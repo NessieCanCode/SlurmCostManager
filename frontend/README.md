@@ -1,8 +1,8 @@
 # Frontend
 
-React + Vite setup for SlurmCostManager.
+React + Vite + TypeScript setup for SlurmCostManager.
 
-```
-yarn install # or npm install
+```bash
+npm install
 npm run dev
 ```
