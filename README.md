@@ -54,6 +54,20 @@ Cockpit’s `manifest.json` registers your tool under the main menu. Your UI fil
 3. Locate **SlurmCostManager** in the sidebar menu.
 4. Interact with billing summaries, drill-ins, and invoice retrieval directly within Cockpit.
 
+### Fetching real Slurm usage
+
+The `src/slurmdb.py` utility can connect to a running **SlurmDBD** instance and
+export usage metrics as JSON.  Connection parameters are read from the
+environment variables `SLURMDB_HOST`, `SLURMDB_PORT`, `SLURMDB_USER`,
+`SLURMDB_PASS` and `SLURMDB_DB`.
+
+```bash
+python3 src/slurmdb.py --start 2024-06-01 --end 2024-06-30 --output billing.json
+```
+
+The resulting `billing.json` file mirrors the structure expected by the
+frontend so it can be dropped in place of `mock-billing.json`.
+
 ## 📝 Development Notes
 
 - Your UI components can access system files or commands using `cockpit.file()` and other Cockpit APIs.
