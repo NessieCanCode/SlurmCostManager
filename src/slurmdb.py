@@ -12,7 +12,17 @@ except ImportError:  # fallback if pymysql is missing
 class SlurmDB:
     """Simple wrapper around the Slurm accounting database."""
 
-    def __init__(self, host=None, port=None, user=None, password=None, database=None, config_file=None):
+    def __init__(
+        self,
+        host=None,
+        port=None,
+        user=None,
+        password=None,
+        database=None,
+        config_file=None,
+        cluster=None,
+        slurm_conf=None,
+    ):
         conf_path = config_file or os.environ.get("SLURMDB_CONF", "/etc/slurm/slurmdbd.conf")
         cfg = self._load_config(conf_path)
 
@@ -23,6 +33,13 @@ class SlurmDB:
         self.database = database or os.environ.get("SLURMDB_DB") or cfg.get("db", "slurm_acct_db")
         self._conn = None
         self._config_file = conf_path
+        self._slurm_conf = slurm_conf or os.environ.get("SLURM_CONF", "/etc/slurm/slurm.conf")
+        self.cluster = (
+            cluster
+            or os.environ.get("SLURM_CLUSTER")
+            or self._load_cluster_name(self._slurm_conf)
+        )
+
 
     def _load_config(self, path):
         """Parse slurmdbd.conf for storage connection details."""
@@ -54,6 +71,19 @@ class SlurmDB:
                 pass
         return cfg
 
+    def _load_cluster_name(self, conf_path):
+        """Parse slurm.conf for the ClusterName."""
+        if conf_path and os.path.exists(conf_path):
+            try:
+                with open(conf_path) as fh:
+                    for line in fh:
+                        line = line.strip()
+                        if line.startswith('ClusterName') and '=' in line:
+                            return line.split('=', 1)[1].strip()
+            except OSError:
+                pass
+        return None
+
     def connect(self):
         if pymysql is None:
             raise RuntimeError("pymysql is required but not installed")
@@ -66,6 +96,12 @@ class SlurmDB:
                 database=self.database,
                 cursorclass=pymysql.cursors.DictCursor,
             )
+        if not self.cluster:
+            with self._conn.cursor() as cur:
+                cur.execute("SELECT name FROM cluster_table LIMIT 1")
+                row = cur.fetchone()
+                if row and 'name' in row:
+                    self.cluster = row['name']
 
     def _parse_mem(self, mem_str):
         if not mem_str:
@@ -94,9 +130,10 @@ class SlurmDB:
         """Fetch raw job records from SlurmDBD."""
         self.connect()
         with self._conn.cursor() as cur:
+            table = f"{self.cluster}_job_table" if self.cluster else "job_table"
             query = (
-                "SELECT account, time_start, time_end, tres_alloc, req_mem "
-                "FROM job_table WHERE time_start >= %s AND time_end <= %s"
+                f"SELECT account, time_start, time_end, tres_alloc, req_mem "
+                f"FROM {table} WHERE time_start >= %s AND time_end <= %s"
             )
             cur.execute(query, (start_time, end_time))
             return cur.fetchall()
@@ -132,6 +169,10 @@ class SlurmDB:
         """Fetch invoice metadata from the database if present."""
         self.connect()
         with self._conn.cursor() as cur:
+            cur.execute("SHOW TABLES LIKE 'invoices'")
+            if not cur.fetchone():
+                return []
+
             if start_date and end_date:
                 query = (
                     "SELECT file, invoice_date FROM invoices "
@@ -189,11 +230,20 @@ if __name__ == "__main__":
     parser.add_argument("--end", required=True, help="end date YYYY-MM-DD")
     parser.add_argument("--output", default="usage.json", help="output file path")
     parser.add_argument("--conf", help="path to slurmdbd.conf")
+    parser.add_argument("--cluster", help="cluster name (table prefix)")
+    parser.add_argument(
+        "--slurm-conf",
+        dest="slurm_conf",
+        help="path to slurm.conf for auto cluster detection",
+    )
 
     args = parser.parse_args()
 
-    db = SlurmDB(config_file=args.conf)
-
+    db = SlurmDB(
+        config_file=args.conf,
+        cluster=args.cluster,
+        slurm_conf=args.slurm_conf,
+    )
     data = db.export_summary(args.start, args.end)
 
     with open(args.output, "w") as fh:

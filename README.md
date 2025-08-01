@@ -61,12 +61,15 @@ export usage metrics as JSON. Connection details are automatically scraped from
 `/etc/slurm/slurmdbd.conf` (or a custom path specified via the environment
 variable `SLURMDB_CONF` or the `--conf` flag). Environment variables
 `SLURMDB_HOST`, `SLURMDB_PORT`, `SLURMDB_USER`, `SLURMDB_PASS` and `SLURMDB_DB`
-override any values found in the configuration file.
+override any values found in the configuration file. The cluster prefix used to
+select the job tables is determined from `/etc/slurm/slurm.conf` but can be set
+using `SLURM_CLUSTER`, `--cluster` or `--slurm-conf`.
+
 
 ```bash
 python3 src/slurmdb.py --start 2024-06-01 --end 2024-06-30 --output billing.json
 # optional custom config path
-# python3 src/slurmdb.py --start ... --end ... --conf /path/to/slurmdbd.conf
+# python3 src/slurmdb.py --start ... --end ... --conf /path/to/slurmdbd.conf --cluster localcluster
 ```
 
 The resulting `billing.json` file mirrors the structure expected by the
