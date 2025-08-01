@@ -62,8 +62,3 @@ We welcome community contributions. Please see [CONTRIBUTING.md](CONTRIBUTING.md
 ## 📄 License
 
 **SlurmCostManager** is licensed under **MIT**—see the [LICENSE](LICENSE) file for details.
-
-
-## 🏷️ Tags
-
-`cockpit`, `slurm`, `hpc`, `billing`, `cost-management`, `plugin`, `open-source`, `javascript`, `react`, `linux-admin`
