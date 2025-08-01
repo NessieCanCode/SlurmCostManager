@@ -12,13 +12,47 @@ except ImportError:  # fallback if pymysql is missing
 class SlurmDB:
     """Simple wrapper around the Slurm accounting database."""
 
-    def __init__(self, host=None, port=None, user=None, password=None, database=None):
-        self.host = host or os.environ.get("SLURMDB_HOST", "localhost")
-        self.port = int(port or os.environ.get("SLURMDB_PORT", 3306))
-        self.user = user or os.environ.get("SLURMDB_USER", "slurm")
-        self.password = password or os.environ.get("SLURMDB_PASS", "")
-        self.database = database or os.environ.get("SLURMDB_DB", "slurm_acct_db")
+    def __init__(self, host=None, port=None, user=None, password=None, database=None, config_file=None):
+        conf_path = config_file or os.environ.get("SLURMDB_CONF", "/etc/slurm/slurmdbd.conf")
+        cfg = self._load_config(conf_path)
+
+        self.host = host or os.environ.get("SLURMDB_HOST") or cfg.get("host", "localhost")
+        self.port = int(port or os.environ.get("SLURMDB_PORT") or cfg.get("port", 3306))
+        self.user = user or os.environ.get("SLURMDB_USER") or cfg.get("user", "slurm")
+        self.password = password or os.environ.get("SLURMDB_PASS") or cfg.get("password", "")
+        self.database = database or os.environ.get("SLURMDB_DB") or cfg.get("db", "slurm_acct_db")
         self._conn = None
+        self._config_file = conf_path
+
+    def _load_config(self, path):
+        """Parse slurmdbd.conf for storage connection details."""
+        cfg = {}
+        if path and os.path.exists(path):
+            try:
+                with open(path) as fh:
+                    for line in fh:
+                        line = line.strip()
+                        if not line or line.startswith('#') or '=' not in line:
+                            continue
+                        key, val = line.split('=', 1)
+                        key = key.strip()
+                        val = val.strip()
+                        if key == 'StorageHost':
+                            cfg['host'] = val
+                        elif key == 'StoragePort':
+                            try:
+                                cfg['port'] = int(val)
+                            except ValueError:
+                                pass
+                        elif key == 'StorageUser':
+                            cfg['user'] = val
+                        elif key == 'StoragePass':
+                            cfg['password'] = val
+                        elif key == 'StorageLoc':
+                            cfg['db'] = val
+            except OSError:
+                pass
+        return cfg
 
     def connect(self):
         if pymysql is None:
@@ -154,10 +188,12 @@ if __name__ == "__main__":
     parser.add_argument("--start", required=True, help="start date YYYY-MM-DD")
     parser.add_argument("--end", required=True, help="end date YYYY-MM-DD")
     parser.add_argument("--output", default="usage.json", help="output file path")
+    parser.add_argument("--conf", help="path to slurmdbd.conf")
 
     args = parser.parse_args()
 
-    db = SlurmDB()
+    db = SlurmDB(config_file=args.conf)
+
     data = db.export_summary(args.start, args.end)
 
     with open(args.output, "w") as fh:

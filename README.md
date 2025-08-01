@@ -57,12 +57,16 @@ Cockpit’s `manifest.json` registers your tool under the main menu. Your UI fil
 ### Fetching real Slurm usage
 
 The `src/slurmdb.py` utility can connect to a running **SlurmDBD** instance and
-export usage metrics as JSON.  Connection parameters are read from the
-environment variables `SLURMDB_HOST`, `SLURMDB_PORT`, `SLURMDB_USER`,
-`SLURMDB_PASS` and `SLURMDB_DB`.
+export usage metrics as JSON. Connection details are automatically scraped from
+`/etc/slurm/slurmdbd.conf` (or a custom path specified via the environment
+variable `SLURMDB_CONF` or the `--conf` flag). Environment variables
+`SLURMDB_HOST`, `SLURMDB_PORT`, `SLURMDB_USER`, `SLURMDB_PASS` and `SLURMDB_DB`
+override any values found in the configuration file.
 
 ```bash
 python3 src/slurmdb.py --start 2024-06-01 --end 2024-06-30 --output billing.json
+# optional custom config path
+# python3 src/slurmdb.py --start ... --end ... --conf /path/to/slurmdbd.conf
 ```
 
 The resulting `billing.json` file mirrors the structure expected by the
