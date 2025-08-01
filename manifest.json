@@ -1,0 +1,12 @@
+{
+  "version": 1,
+  "name": "slurmcostmanager",
+  "license": "MIT",
+  "requires": {
+    "cockpit": "142"
+  },
+  "menu": {
+    "index": "slurmcostmanager.html",
+    "label": "Slurm Cost Manager"
+  }
+}

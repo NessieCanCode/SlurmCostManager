@@ -1,0 +1,35 @@
+body {
+  font-family: sans-serif;
+  margin: 0;
+  padding: 0;
+}
+
+nav {
+  background: #333;
+  padding: 0.5em;
+}
+
+nav button {
+  margin-right: 0.5em;
+  padding: 0.5em 1em;
+  color: #fff;
+  background: #555;
+  border: none;
+  border-radius: 3px;
+  cursor: pointer;
+}
+
+nav button:hover {
+  background: #777;
+}
+
+.app {
+  padding: 1em;
+}
+
+@media (max-width: 600px) {
+  nav button {
+    display: block;
+    margin: 0.5em 0;
+  }
+}

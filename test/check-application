@@ -1,0 +1,5 @@
+#!/usr/bin/env bash
+# Placeholder test script
+echo "Running SlurmCostManager tests..."
+# In a full implementation, Cockpit's integration tests would be invoked here.
+exit 0
