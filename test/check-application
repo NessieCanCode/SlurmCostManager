@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
-# Placeholder test script
-echo "Running SlurmCostManager tests..."
-# In a full implementation, Cockpit's integration tests would be invoked here.
-exit 0
+# Run unit tests for SlurmCostManager
+set -e
+
+# unit tests
+node test/unit/calculator.test.js
