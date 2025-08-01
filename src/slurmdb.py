@@ -193,6 +193,7 @@ if __name__ == "__main__":
     args = parser.parse_args()
 
     db = SlurmDB(config_file=args.conf)
+
     data = db.export_summary(args.start, args.end)
 
     with open(args.output, "w") as fh:
