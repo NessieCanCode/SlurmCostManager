@@ -21,7 +21,7 @@ SlurmCostManager/
 │   ├── slurmcostmanager.html              # HTML entrypoint loaded inside Cockpit
 │   └── slurmcostmanager.js                # Frontend plugin logic, using cockpit APIs
 ├── manifest.json                          # Cockpit module metadata, menu registration
-├── Makefile                               # Build, install, devel-install, watch, check targets
+├── Makefile                               # Build, devel-install, devel-uninstall, watch, check targets
 ├── dist/                                  # Bundled output directory for Cockpit to load
 ├── test/                                  # Integration tests using Cockpit test harness
 │   └── check-application                  # Python-based browser tests via DevTools protocol
@@ -34,10 +34,18 @@ SlurmCostManager/
 
 Recommend using the **Cockpit Starter Kit** workflow to scaffold and build your plugin:
 
-- Use `make devel-install` to symlink your dist output into `~/.local/share/cockpit/` for live development.  
-- Run `make build` or `make` to compile and prepare for release.  
+- Use `make devel-install` to symlink your dist output into `~/.local/share/cockpit/` for live development.
+- Use `make devel-uninstall` when finished to remove the development symlink.
+- Optionally run `make watch` to rebuild and reinstall whenever files in `src/` change (requires `inotifywait`).
+- Run `make build` or `make` to compile and prepare for release.
 - Use `make check` to run integration tests via Cockpit's VM-based test system.
 Cockpit’s `manifest.json` registers your tool under the main menu. Your UI files will live in `src/`, built via webpack into `dist/`.
+
+### Manual verification
+
+1. Run `make devel-install` and confirm that `~/.local/share/cockpit/slurmcostmanager` is a symlink.
+2. Open Cockpit at `https://<host>:9090` and verify the **SlurmCostManager** entry appears.
+3. When done developing, execute `make devel-uninstall` to remove the symlink.
 
 ## 🌐 Usage
 
