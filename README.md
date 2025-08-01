@@ -2,6 +2,7 @@
 
 **SlurmCostManager** is a Cockpit plugin that integrates seamlessly into the Cockpit UI on Linux servers. It provides interactive billing analytics and invoice management for HPC environments using **Slurm** and SlurmDBD.
 
+This repository now includes an initial responsive Cockpit UI built with React, providing mock billing summaries, cost details, and invoice views.
 
 ## ✅ Features
 
@@ -35,10 +36,8 @@ Recommend using the **Cockpit Starter Kit** workflow to scaffold and build your 
 
 - Use `make devel-install` to symlink your dist output into `~/.local/share/cockpit/` for live development.  
 - Run `make build` or `make` to compile and prepare for release.  
-- Use `make check` to run integration tests via Cockpit's VM-based test system :contentReference[oaicite:1]{index=1}.
-
+- Use `make check` to run integration tests via Cockpit's VM-based test system.
 Cockpit’s `manifest.json` registers your tool under the main menu. Your UI files will live in `src/`, built via webpack into `dist/`.
-
 
 ## 🌐 Usage
 
@@ -51,13 +50,9 @@ Cockpit’s `manifest.json` registers your tool under the main menu. Your UI fil
 
 - Your UI components can access system files or commands using `cockpit.file()` and other Cockpit APIs.
 - Write integration tests using the Python-based browser automation tools bundled with Cockpit Starter Kit.
-- Ensure cross‑OS compatibility by leveraging Cockpit’s built-in CI and test VM infrastructure :contentReference[oaicite:2]{index=2}.
-
-
-## 🤝 Contributing
+- Ensure cross‑OS compatibility by leveraging Cockpit’s built-in CI and test VM infrastructure.
 
 We welcome community contributions. Please see [CONTRIBUTING.md](CONTRIBUTING.md) for guidelines.
-
 
 ## 📄 License
 
