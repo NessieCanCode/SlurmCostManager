@@ -40,6 +40,7 @@ class SlurmDB:
             or self._load_cluster_name(self._slurm_conf)
         )
 
+
     def _load_config(self, path):
         """Parse slurmdbd.conf for storage connection details."""
         cfg = {}
