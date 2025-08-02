@@ -11,6 +11,12 @@
     {"account": "acct2", "core_hours": 6000, "instance_hours": 1500, "gb_month": 200, "cost": 700}
   ],
   "invoices": [
-    {"file": "invoice-june.pdf", "date": "2024-06-30"}
+    {
+      "id": "2024-06",
+      "filename": "invoice-june.pdf",
+      "date": "2024-06-30",
+      "size": 597,
+      "archived": false
+    }
   ]
 }

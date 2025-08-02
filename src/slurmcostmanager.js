@@ -122,6 +122,52 @@ function Details({ details }) {
 
 function Invoices({ invoices }) {
   const [selected, setSelected] = useState(null);
+  const [urls, setUrls] = useState({});
+  const [list, setList] = useState(invoices);
+
+  const baseDir = '/usr/share/cockpit/slurmcostmanager/invoices';
+
+  async function loadInvoice(file) {
+    if (file.includes('..') || file.includes('/')) {
+      throw new Error('Invalid invoice filename');
+    }
+    let blob;
+    if (window.cockpit && window.cockpit.file) {
+      const raw = await window.cockpit
+        .file(`${baseDir}/${file}`, { binary: true })
+        .read();
+      blob = new Blob([raw], { type: 'application/pdf' });
+    } else {
+      const resp = await fetch(`invoices/${file}`);
+      blob = await resp.blob();
+    }
+    return URL.createObjectURL(blob);
+  }
+
+  async function ensureUrl(file) {
+    if (urls[file]) return urls[file];
+    const url = await loadInvoice(file);
+    setUrls(prev => ({ ...prev, [file]: url }));
+    return url;
+  }
+
+  function handleView(inv) {
+    ensureUrl(inv.filename).then(url => setSelected(url));
+  }
+
+  function handleDownload(inv) {
+    ensureUrl(inv.filename).then(url => {
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = inv.filename;
+      a.click();
+    });
+  }
+
+  function handleArchive(id) {
+    setList(prev => prev.map(inv => (inv.id === id ? { ...inv, archived: true } : inv)));
+  }
+
   return React.createElement(
     'div',
     null,
@@ -129,22 +175,33 @@ function Invoices({ invoices }) {
     React.createElement(
       'ul',
       { className: 'invoice-list' },
-      invoices.map((inv, i) =>
-        React.createElement(
-          'li',
-          { key: i },
+      list
+        .filter(inv => !inv.archived)
+        .map(inv =>
           React.createElement(
-            'button',
-            {
-              className: 'link-btn',
-              onClick: () => setSelected(inv.file)
-            },
-            `${inv.date}`
-          ),
-          ' - ',
-          React.createElement('a', { href: inv.file, download: true }, 'Download')
+            'li',
+            { key: inv.id },
+            `${inv.date} (${(inv.size / 1024).toFixed(1)} KB)`,
+            ' ',
+            React.createElement(
+              'button',
+              { className: 'link-btn', onClick: () => handleView(inv) },
+              'View'
+            ),
+            ' | ',
+            React.createElement(
+              'button',
+              { className: 'link-btn', onClick: () => handleDownload(inv) },
+              'Download'
+            ),
+            ' | ',
+            React.createElement(
+              'button',
+              { className: 'link-btn', onClick: () => handleArchive(inv.id) },
+              'Archive'
+            )
+          )
         )
-      )
     ),
     selected &&
       React.createElement('iframe', {
