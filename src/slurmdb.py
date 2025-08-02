@@ -132,7 +132,7 @@ class SlurmDB:
         with self._conn.cursor() as cur:
             table = f"{self.cluster}_job_table" if self.cluster else "job_table"
             query = (
-                f"SELECT account, time_start, time_end, tres_alloc, req_mem "
+                f"SELECT account, time_start, time_end, tres_alloc, mem_req "
                 f"FROM {table} WHERE time_start >= %s AND time_end <= %s"
             )
             cur.execute(query, (start_time, end_time))
@@ -154,7 +154,7 @@ class SlurmDB:
             account = row.get('account') or 'unknown'
             cpus = self._parse_tres(row.get('tres_alloc'), 'cpu')
             nodes = self._parse_tres(row.get('tres_alloc'), 'node')
-            mem_gb = self._parse_mem(row.get('req_mem'))
+            mem_gb = self._parse_mem(row.get('mem_req'))
 
             month_entry = agg.setdefault(month, {})
             acct_entry = month_entry.setdefault(

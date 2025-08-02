@@ -75,6 +75,21 @@ python3 src/slurmdb.py --start 2024-06-01 --end 2024-06-30 --output billing.json
 The resulting `billing.json` file mirrors the structure expected by the
 frontend so it can be dropped in place of `mock-billing.json`.
 
+### Inspecting the database schema
+
+If you need to see which tables and columns are present in your Slurm
+accounting database, run the helper script `src/slurm_schema.py`.  It
+uses the same connection options as `slurmdb.py` and writes a JSON
+mapping of tables to their columns.
+
+```bash
+python3 src/slurm_schema.py --output schema.json
+# python3 src/slurm_schema.py --conf /path/to/slurmdbd.conf --cluster localcluster
+```
+
+The resulting `schema.json` file can be compared with the list of
+tables and columns from your deployment.
+
 ## 📝 Development Notes
 
 - Your UI components can access system files or commands using `cockpit.file()` and other Cockpit APIs.
