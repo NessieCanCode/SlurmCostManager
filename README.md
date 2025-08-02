@@ -18,6 +18,8 @@ This repository now includes a responsive Cockpit UI built with React.  The inte
 ```text
 SlurmCostManager/
 ├── src/                                   # Source UI code built with React or modern JS
+│   ├── invoices/                          # Stored invoice PDFs
+│   ├── invoice-schema.json                # Invoice metadata schema
 │   ├── slurmcostmanager.html              # HTML entrypoint loaded inside Cockpit
 │   └── slurmcostmanager.js                # Frontend plugin logic, using cockpit APIs
 ├── manifest.json                          # Cockpit module metadata, menu registration

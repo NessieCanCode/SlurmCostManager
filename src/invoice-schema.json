@@ -1,0 +1,31 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "Invoice",
+  "description": "Schema for invoice metadata entries",
+  "type": "object",
+  "properties": {
+    "id": {
+      "type": "string",
+      "description": "Unique invoice identifier"
+    },
+    "filename": {
+      "type": "string",
+      "description": "PDF filename stored on the server"
+    },
+    "date": {
+      "type": "string",
+      "format": "date",
+      "description": "Billing period end date"
+    },
+    "size": {
+      "type": "integer",
+      "description": "File size in bytes"
+    },
+    "archived": {
+      "type": "boolean",
+      "description": "Whether the invoice has been archived"
+    }
+  },
+  "required": ["id", "filename", "date"],
+  "additionalProperties": false
+}
