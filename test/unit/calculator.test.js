@@ -34,11 +34,20 @@ function testDiscount() {
   assert.strictEqual(charges['2024-06'].acct3.cost, 100 * 0.01 * 0.5);
 }
 
+function testInvalidUsageIgnored() {
+  const usage = [
+    { account: 'acct4', date: '2024-06-01', core_hours: 'not-a-number' }
+  ];
+  const charges = calculateCharges(usage, { defaultRate: 0.01 });
+  assert.deepStrictEqual(charges, {});
+}
+
 function run() {
   testDefaultRate();
   testHistoricalRate();
   testAccountOverride();
   testDiscount();
+  testInvalidUsageIgnored();
   console.log('All calculator tests passed.');
 }
 

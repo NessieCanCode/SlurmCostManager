@@ -40,6 +40,8 @@ class SlurmDB:
             or self._load_cluster_name(self._slurm_conf)
         )
 
+        self._validate_config()
+
 
     def _load_config(self, path):
         """Parse slurmdbd.conf for storage connection details."""
@@ -70,6 +72,29 @@ class SlurmDB:
             except OSError:
                 pass
         return cfg
+
+    _IDENT_RE = re.compile(r"^[A-Za-z0-9_]+$")
+    _HOST_RE = re.compile(r"^[A-Za-z0-9_.-]+$")
+
+    def _validate_config(self):
+        """Validate configuration values to avoid injection."""
+        if not self._HOST_RE.match(str(self.host)):
+            raise ValueError("Invalid host")
+        if not isinstance(self.port, int) or not (1 <= self.port <= 65535):
+            raise ValueError("Invalid port")
+        for attr in ("user", "database", "cluster"):
+            val = getattr(self, attr)
+            if val and not self._IDENT_RE.match(str(val)):
+                raise ValueError(f"Invalid {attr}")
+
+    _DATE_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
+
+    def _validate_time(self, value, name):
+        if isinstance(value, (int, float)):
+            return int(value)
+        if isinstance(value, str) and self._DATE_RE.match(value):
+            return value
+        raise ValueError(f"Invalid {name} format")
 
     def _load_cluster_name(self, conf_path):
         """Parse slurm.conf for the ClusterName."""
@@ -128,6 +153,10 @@ class SlurmDB:
 
     def fetch_usage_records(self, start_time, end_time):
         """Fetch raw job records from SlurmDBD."""
+        start_time = self._validate_time(start_time, "start_time")
+        end_time = self._validate_time(end_time, "end_time")
+        if isinstance(start_time, int) and isinstance(end_time, int) and start_time > end_time:
+            raise ValueError("start_time must be before end_time")
         self.connect()
         with self._conn.cursor() as cur:
             table = f"{self.cluster}_job_table" if self.cluster else "job_table"
@@ -167,6 +196,10 @@ class SlurmDB:
 
     def fetch_invoices(self, start_date=None, end_date=None):
         """Fetch invoice metadata from the database if present."""
+        if start_date:
+            start_date = self._validate_time(start_date, "start_date")
+        if end_date:
+            end_date = self._validate_time(end_date, "end_date")
         self.connect()
         with self._conn.cursor() as cur:
             cur.execute("SHOW TABLES LIKE 'invoices'")
