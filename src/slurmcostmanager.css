@@ -7,6 +7,8 @@ body {
 nav {
   background: #333;
   padding: 0.5em;
+  display: flex;
+  flex-wrap: wrap;
 }
 
 nav button {
@@ -27,6 +29,10 @@ nav button:hover {
   padding: 1em;
 }
 
+.table-container {
+  overflow-x: auto;
+}
+
 .summary-table th {
   text-align: left;
   padding-right: 1em;
@@ -35,6 +41,7 @@ nav button:hover {
 .details-table,
 .summary-table {
   border-collapse: collapse;
+  width: 100%;
 }
 
 .details-table th,
@@ -61,13 +68,34 @@ nav button:hover {
 
 .invoice-frame {
   width: 100%;
-  height: 400px;
+  height: 60vh;
   border: 1px solid #ccc;
   margin-top: 1em;
 }
 
 .error {
   color: red;
+}
+
+.clickable {
+  cursor: pointer;
+}
+
+.users-table {
+  width: 100%;
+  border-collapse: collapse;
+  margin-top: 0.5em;
+}
+
+.users-table th,
+.users-table td {
+  border: 1px solid #ccc;
+  padding: 0.25em 0.5em;
+}
+
+.chart-container {
+  position: relative;
+  height: 300px;
 }
 
 @media (max-width: 600px) {

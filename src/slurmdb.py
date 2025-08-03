@@ -1,6 +1,7 @@
 import os
 import re
 import json
+import sys
 from datetime import datetime
 
 try:
@@ -161,7 +162,7 @@ class SlurmDB:
         with self._conn.cursor() as cur:
             table = f"{self.cluster}_job_table" if self.cluster else "job_table"
             query = (
-                f"SELECT account, time_start, time_end, tres_alloc, mem_req "
+                f"SELECT account, user, time_start, time_end, tres_alloc, mem_req "
                 f"FROM {table} WHERE time_start >= %s AND time_end <= %s"
             )
             cur.execute(query, (start_time, end_time))
@@ -181,17 +182,28 @@ class SlurmDB:
             dur_hours = (end - start).total_seconds() / 3600.0
             month = start.strftime('%Y-%m')
             account = row.get('account') or 'unknown'
+            user = row.get('user') or 'unknown'
             cpus = self._parse_tres(row.get('tres_alloc'), 'cpu')
             nodes = self._parse_tres(row.get('tres_alloc'), 'node')
             mem_gb = self._parse_mem(row.get('mem_req'))
 
             month_entry = agg.setdefault(month, {})
             acct_entry = month_entry.setdefault(
-                account, {'core_hours': 0.0, 'instance_hours': 0.0, 'gb_month': 0.0}
+                account,
+                {
+                    'core_hours': 0.0,
+                    'instance_hours': 0.0,
+                    'gb_month': 0.0,
+                    'users': {},
+                },
             )
             acct_entry['core_hours'] += cpus * dur_hours
             acct_entry['instance_hours'] += nodes * dur_hours
             acct_entry['gb_month'] += mem_gb * dur_hours / (24.0 * 30.0)
+            user_entry = acct_entry['users'].setdefault(
+                user, {'core_hours': 0.0}
+            )
+            user_entry['core_hours'] += cpus * dur_hours
         return agg
 
     def fetch_invoices(self, start_date=None, end_date=None):
@@ -230,23 +242,48 @@ class SlurmDB:
         total_ch = 0.0
         total_ih = 0.0
         total_gbm = 0.0
+        total_cost = 0.0
+
+        rates_path = os.path.join(os.path.dirname(__file__), 'rates.json')
+        try:
+            with open(rates_path) as fh:
+                rates_cfg = json.load(fh)
+        except Exception:
+            rates_cfg = {}
+        default_rate = rates_cfg.get('defaultRate', 0.01)
+
         for month, accounts in usage.items():
             for account, vals in accounts.items():
+                users = []
+                acct_cost = vals['core_hours'] * default_rate
+                for user, uvals in vals.get('users', {}).items():
+                    u_cost = uvals['core_hours'] * default_rate
+                    users.append({
+                        'user': user,
+                        'core_hours': round(uvals['core_hours'], 2),
+                        'cost': round(u_cost, 2),
+                    })
                 summary['details'].append(
                     {
                         'account': account,
-                        'month': month,
                         'core_hours': round(vals['core_hours'], 2),
                         'instance_hours': round(vals['instance_hours'], 2),
                         'gb_month': round(vals['gb_month'], 2),
+                        'cost': round(acct_cost, 2),
+                        'users': users,
                     }
                 )
                 total_ch += vals['core_hours']
                 total_ih += vals['instance_hours']
                 total_gbm += vals['gb_month']
+                total_cost += acct_cost
         summary['summary'] = {
-            'period_start': start_time,
-            'period_end': end_time,
+            'month': (
+                datetime.fromisoformat(start_time)
+                if isinstance(start_time, str)
+                else datetime.fromtimestamp(start_time)
+            ).strftime('%B %Y'),
+            'total': round(total_cost, 2),
             'core_hours': round(total_ch, 2),
             'instance_hours': round(total_ih, 2),
             'gb_month': round(total_gbm, 2),
@@ -279,7 +316,9 @@ if __name__ == "__main__":
     )
     data = db.export_summary(args.start, args.end)
 
-    with open(args.output, "w") as fh:
-        json.dump(data, fh, indent=2, default=str)
-
-    print(f"Wrote {args.output}")
+    if args.output == '-' or args.output == '/dev/stdout':
+        json.dump(data, sys.stdout, indent=2, default=str)
+    else:
+        with open(args.output, "w") as fh:
+            json.dump(data, fh, indent=2, default=str)
+        print(f"Wrote {args.output}")
