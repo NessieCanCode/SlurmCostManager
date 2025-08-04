@@ -61,6 +61,17 @@ Both targets generate `org.cockpit_project.slurmcostmanager.metainfo.xml` and bu
 2. Open Cockpit at `https://<host>:9090` and verify the **SlurmCostManager** entry appears.
 3. When done developing, execute `make devel-uninstall` to remove the symlink.
 
+## 🧭 Versioning and Releases
+
+The project follows [Semantic Versioning](https://semver.org/). All notable changes are recorded in [CHANGELOG.md](CHANGELOG.md) and upgrade notes live in [UPGRADING.md](UPGRADING.md).
+
+To cut a new release:
+
+1. Bump the version in `manifest.json` and update the changelog and upgrade guide.
+2. Trigger the **Release** workflow from the GitHub Actions tab and supply the new version number.
+
+The workflow tags the repository, builds packages, and publishes artifacts to GitHub Releases automatically.
+
 ## 🌐 Usage
 
 1. On a Linux host with **Cockpit** installed (e.g. CentOS, Fedora, Debian compatible).
