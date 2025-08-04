@@ -1,30 +1,4 @@
 #!/usr/bin/env python3
- import os
- import re
- import json
- import sys
- from datetime import datetime
- 
- try:
-     import pymysql
- except ImportError:  # fallback if pymysql is missing
-     pymysql = None
- 
- 
- class SlurmDB:
-     """Simple wrapper around the Slurm accounting database."""
- 
-     def __init__(
-         self,
-         host=None,
-         port=None,
-         user=None,
-         password=None,
-         database=None,
-         config_file=None,
-         cluster=None,
-         slurm_conf=None,
-
 import os
 import re
 import json
