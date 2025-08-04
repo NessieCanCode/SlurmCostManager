@@ -1,52 +1,41 @@
 const assert = require('assert');
-const { calculateCharges } = require('../../src/cost-calculator');
+const { calculateCharges, loadRatesConfig } = require('../../src/cost-calculator');
 
-function testDefaultRate() {
+function testFileConfig() {
   const usage = [
-    { account: 'acct1', date: '2024-06-01', core_hours: 100 },
-    { account: 'acct1', date: '2024-06-02', core_hours: 50 }
+    { account: 'education', date: '2024-01-15', core_hours: 100 },
+    { account: 'research', date: '2024-02-01', core_hours: 50 },
+    { account: 'special', date: '2024-02-01', core_hours: 100 },
+    { account: 'other', date: '2024-02-01', core_hours: 10 }
   ];
-  const charges = calculateCharges(usage, { defaultRate: 0.01 });
-  assert.strictEqual(charges['2024-06'].acct1.cost, 150 * 0.01);
+  const config = loadRatesConfig();
+  const charges = calculateCharges(usage, config);
+  assert.strictEqual(charges['2024-01'].education.cost, 100 * 0.015 * 0.5);
+  assert.strictEqual(charges['2024-02'].research.cost, 50 * 0.01);
+  assert.strictEqual(charges['2024-02'].special.cost, 100 * 0.025 * 0.9);
+  assert.strictEqual(charges['2024-02'].other.cost, 10 * 0.02);
 }
 
-function testHistoricalRate() {
+function testPassedConfig() {
   const usage = [
-    { account: 'acct1', date: '2024-07-01', core_hours: 100 }
+    { account: 'acct', date: '2024-03-01', core_hours: 100 }
   ];
-  const charges = calculateCharges(usage, { defaultRate: 0.01, historicalRates: { '2024-07': 0.02 } });
-  assert.strictEqual(charges['2024-07'].acct1.cost, 100 * 0.02);
-}
-
-function testAccountOverride() {
-  const usage = [
-    { account: 'acct2', date: '2024-06-01', core_hours: 200 }
-  ];
-  const charges = calculateCharges(usage, { defaultRate: 0.01, overrides: { acct2: { rate: 0.005 } } });
-  assert.strictEqual(charges['2024-06'].acct2.cost, 200 * 0.005);
-}
-
-function testDiscount() {
-  const usage = [
-    { account: 'acct3', date: '2024-06-01', core_hours: 100 }
-  ];
-  const charges = calculateCharges(usage, { defaultRate: 0.01, overrides: { acct3: { discount: 0.5 } } });
-  assert.strictEqual(charges['2024-06'].acct3.cost, 100 * 0.01 * 0.5);
+  const config = { defaultRate: 0.02, historicalRates: { '2024-03': 0.03 }, overrides: { acct: { discount: 0.25 } } };
+  const charges = calculateCharges(usage, config);
+  assert.strictEqual(charges['2024-03'].acct.cost, 100 * 0.03 * 0.75);
 }
 
 function testInvalidUsageIgnored() {
   const usage = [
-    { account: 'acct4', date: '2024-06-01', core_hours: 'not-a-number' }
+    { account: 'bad', date: '2024-04-01', core_hours: 'NaN' }
   ];
   const charges = calculateCharges(usage, { defaultRate: 0.01 });
   assert.deepStrictEqual(charges, {});
 }
 
 function run() {
-  testDefaultRate();
-  testHistoricalRate();
-  testAccountOverride();
-  testDiscount();
+  testFileConfig();
+  testPassedConfig();
   testInvalidUsageIgnored();
   console.log('All calculator tests passed.');
 }

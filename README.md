@@ -11,6 +11,7 @@ This repository now includes a responsive Cockpit UI built with React.  The inte
 - **Detailed cost drill-downs** (core‑hours, instance‑hours, GB‑month) for per‑account transparency.
 - **Historical billing data** accessible from account inception for auditing and trend analysis.
 - **Organization-wide views** consolidating charges across all member Slurm accounts.
+- **Configurable rate table** with per-account overrides, editable from a dedicated Rates tab.
 
 
 ## 📁 Project Structure
@@ -54,7 +55,7 @@ Cockpit’s `manifest.json` registers your tool under the main menu. Your UI fil
 1. On a Linux host with **Cockpit** installed (e.g. CentOS, Fedora, Debian compatible).
 2. After `make devel-install`, open your browser to `https://<host>:9090`.
 3. Locate **SlurmCostManager** in the sidebar menu.
-4. Interact with billing summaries, drill-ins, and invoice retrieval directly within Cockpit.
+4. Interact with billing summaries, drill-ins, invoice retrieval, and configure rates directly within Cockpit.
 
 ### Fetching real Slurm usage
 
