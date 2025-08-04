@@ -1,0 +1,45 @@
+name: Release
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Release version (e.g., 1.2.3)'
+        required: true
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '18'
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.x'
+      - name: Create tag
+        run: |
+          git config user.name "github-actions"
+          git config user.email "github-actions@github.com"
+          git tag v${{ github.event.inputs.version }}
+          git push origin v${{ github.event.inputs.version }}
+      - name: Build
+        run: make build
+      - name: Package
+        run: |
+          make rpm
+          make deb
+      - name: Publish Release
+        uses: softprops/action-gh-release@v1
+        with:
+          tag_name: v${{ github.event.inputs.version }}
+          name: v${{ github.event.inputs.version }}
+          files: |
+            dist/**/*
+            rpmbuild/RPMS/**/*.rpm
+            slurmcostmanager_*.deb
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
