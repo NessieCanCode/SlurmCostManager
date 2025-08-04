@@ -160,10 +160,13 @@ class SlurmDB:
             raise ValueError("start_time must be before end_time")
         self.connect()
         with self._conn.cursor() as cur:
-            table = f"{self.cluster}_job_table" if self.cluster else "job_table"
+            job_table = f"{self.cluster}_job_table" if self.cluster else "job_table"
+            assoc_table = f"{self.cluster}_assoc_table" if self.cluster else "assoc_table"
             query = (
-                f"SELECT account, user, time_start, time_end, tres_alloc, mem_req "
-                f"FROM {table} WHERE time_start >= %s AND time_end <= %s"
+                f"SELECT j.account, a.user AS user_name, j.time_start, j.time_end, "
+                f"j.tres_alloc, j.mem_req FROM {job_table} AS j "
+                f"LEFT JOIN {assoc_table} AS a ON j.id_assoc = a.id_assoc "
+                f"WHERE j.time_start >= %s AND j.time_end <= %s"
             )
             cur.execute(query, (start_time, end_time))
             return cur.fetchall()
@@ -182,7 +185,7 @@ class SlurmDB:
             dur_hours = (end - start).total_seconds() / 3600.0
             month = start.strftime('%Y-%m')
             account = row.get('account') or 'unknown'
-            user = row.get('user') or 'unknown'
+            user = row.get('user_name') or 'unknown'
             cpus = self._parse_tres(row.get('tres_alloc'), 'cpu')
             nodes = self._parse_tres(row.get('tres_alloc'), 'node')
             mem_gb = self._parse_mem(row.get('mem_req'))
