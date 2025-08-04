@@ -44,6 +44,17 @@ Recommend using the **Cockpit Starter Kit** workflow to scaffold and build your 
 - Use `make check` to run integration tests via Cockpit's VM-based test system.
 Cockpit’s `manifest.json` registers your tool under the main menu. Your UI files will live in `src/`, built via webpack into `dist/`.
 
+## 📦 Packaging
+
+Build RPM and DEB packages for distribution:
+
+```bash
+make rpm  # writes an RPM to rpmbuild/RPMS/
+make deb  # creates slurmcostmanager_<version>_all.deb
+```
+
+Both targets generate `org.cockpit_project.slurmcostmanager.metainfo.xml` and bundle the existing `manifest.json` so the packages can be installed on RPM or DEB based systems.
+
 ### Manual verification
 
 1. Run `make devel-install` and confirm that `~/.local/share/cockpit/slurmcostmanager` is a symlink.
