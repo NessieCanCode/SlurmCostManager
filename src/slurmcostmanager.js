@@ -432,9 +432,13 @@ function Rates() {
       }
       const text = JSON.stringify(json, null, 2);
       if (window.cockpit && window.cockpit.file) {
-        await window.cockpit.file(`${baseDir}/rates.json`).write(text);
+        await window.cockpit.file(`${baseDir}/rates.json`).replace(text);
       } else {
-        await fetch('rates.json', { method: 'PUT', body: text });
+        await fetch('rates.json', {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: text
+        });
       }
       setStatus('Saved');
     } catch (e) {
