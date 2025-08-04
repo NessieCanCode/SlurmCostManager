@@ -6,4 +6,5 @@ Thank you for wanting to contribute! Please follow these basic guidelines:
 2. If you've added code, please ensure it is covered by tests.
 3. Update the documentation when adding features.
 4. Make sure the test suite passes (`make check`).
-5. Create a pull request and describe your changes.
+5. Ensure all CI status checks (linting, tests, security scans) pass before requesting a merge.
+6. Create a pull request and describe your changes.
