@@ -1,5 +1,17 @@
 const { useState, useEffect, useRef } = React;
 
+// Determine the directory where the plugin's files are installed. When running
+// inside Cockpit, `window.cockpit.manifest.path` points to the plugin root
+// regardless of whether it lives in `/usr/share` or the user's local data
+// directory. Fallback to the system path for cases where the manifest is not
+// available (e.g. during local development or testing).
+const PLUGIN_BASE =
+  (typeof window !== 'undefined' &&
+    window.cockpit &&
+    window.cockpit.manifest &&
+    window.cockpit.manifest.path) ||
+  '/usr/share/cockpit/slurmcostmanager';
+
 function useBillingData() {
   const [data, setData] = useState(null);
   const [error, setError] = useState(null);
@@ -14,7 +26,7 @@ function useBillingData() {
           const start = new Date(end.getFullYear(), end.getMonth(), 1);
           const args = [
             'python3',
-            '/usr/share/cockpit/slurmcostmanager/slurmdb.py',
+            `${PLUGIN_BASE}/slurmdb.py`,
             '--start',
             start.toISOString().slice(0, 10),
             '--end',
@@ -260,7 +272,7 @@ function Invoices({ invoices }) {
   const [loading, setLoading] = useState(false);
   const [invError, setInvError] = useState(null);
 
-  const baseDir = '/usr/share/cockpit/slurmcostmanager/invoices';
+  const baseDir = `${PLUGIN_BASE}/invoices`;
 
   async function loadInvoice(file) {
     if (file.includes('..') || file.includes('/')) {
@@ -362,7 +374,7 @@ function Rates() {
   const [error, setError] = useState(null);
   const [saving, setSaving] = useState(false);
   const [status, setStatus] = useState(null);
-  const baseDir = '/usr/share/cockpit/slurmcostmanager';
+  const baseDir = PLUGIN_BASE;
 
   useEffect(() => {
     let cancelled = false;
