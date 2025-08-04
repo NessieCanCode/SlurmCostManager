@@ -6,5 +6,5 @@
   <url type="homepage">https://github.com/NessieCanCode/SlurmCostManager</url>
   <metadata_license>MIT</metadata_license>
   <project_license>MIT</project_license>
-  <release version="1.0.0" date="2025-08-04"/>
+  <release version="@VERSION@" date="@DATE@"/>
 </component>
