@@ -98,6 +98,22 @@ nav button:hover {
   height: 300px;
 }
 
+.rates-table {
+  border-collapse: collapse;
+  margin-top: 0.5em;
+}
+
+.rates-table th,
+.rates-table td {
+  border: 1px solid #ccc;
+  padding: 0.25em 0.5em;
+}
+
+.rates-table input {
+  width: 100%;
+  box-sizing: border-box;
+}
+
 @media (max-width: 600px) {
   nav button {
     display: block;

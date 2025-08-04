@@ -1,5 +1,22 @@
 'use strict';
 
+const fs = require('fs');
+const path = require('path');
+
+/**
+ * Load rate configuration from rates.json.
+ *
+ * @returns {Object} rate configuration
+ */
+function loadRatesConfig() {
+  const cfgPath = path.join(__dirname, 'rates.json');
+  try {
+    return JSON.parse(fs.readFileSync(cfgPath, 'utf8'));
+  } catch (e) {
+    return {};
+  }
+}
+
 /**
  * Calculate charges from usage records applying rates and overrides.
  *
@@ -7,8 +24,11 @@
  * @param {Object} config - Configuration with defaultRate, historicalRates, overrides
  * @returns {Object} charges grouped by month then account
  */
-function calculateCharges(usage, config = {}) {
-  const defaultRate = typeof config.defaultRate === 'number' ? config.defaultRate : 0.01;
+function calculateCharges(usage, config) {
+  if (!config) {
+    throw new Error('rate configuration required');
+  }
+  const defaultRate = typeof config.defaultRate === 'number' ? config.defaultRate : 0;
   const historical = config.historicalRates || {};
   const overrides = config.overrides || {};
 
@@ -23,8 +43,9 @@ function calculateCharges(usage, config = {}) {
       ? ovr.rate
       : (typeof historical[month] === 'number' ? historical[month] : defaultRate);
     let cost = record.core_hours * rate;
-    if (typeof ovr.discount === 'number' && ovr.discount > 0 && ovr.discount < 1) {
-      cost = cost * (1 - ovr.discount);
+    const discount = typeof ovr.discount === 'number' ? ovr.discount : 0;
+    if (discount > 0 && discount < 1) {
+      cost *= (1 - discount);
     }
 
     if (!charges[month]) charges[month] = {};
@@ -38,4 +59,5 @@ function calculateCharges(usage, config = {}) {
 
 module.exports = {
   calculateCharges,
+  loadRatesConfig,
 };

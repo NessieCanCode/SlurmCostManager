@@ -1,5 +1,18 @@
 {
-  "defaultRate": 0.01,
-  "historicalRates": {},
-  "overrides": {}
+  "defaultRate": 0.02,
+  "historicalRates": {
+    "2024-01": 0.015
+  },
+  "overrides": {
+    "research": {
+      "rate": 0.01
+    },
+    "education": {
+      "discount": 0.5
+    },
+    "special": {
+      "rate": 0.025,
+      "discount": 0.1
+    }
+  }
 }
