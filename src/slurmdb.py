@@ -98,6 +98,16 @@ class SlurmDB:
             return value
         raise ValueError(f"Invalid {name} format")
 
+    def _to_datetime(self, value):
+        """Convert various timestamp formats to :class:`datetime`."""
+        if isinstance(value, datetime):
+            return value
+        if isinstance(value, (int, float)):
+            return datetime.fromtimestamp(value)
+        if isinstance(value, str):
+            return datetime.fromisoformat(value)
+        raise TypeError("Unsupported time format")
+
     def _load_cluster_name(self, conf_path):
         """Parse slurm.conf for the ClusterName."""
         if conf_path and os.path.exists(conf_path):
@@ -177,12 +187,8 @@ class SlurmDB:
         rows = self.fetch_usage_records(start_time, end_time)
         agg = {}
         for row in rows:
-            start = row['time_start']
-            end = row['time_end'] or start
-            if isinstance(start, str):
-                start = datetime.fromisoformat(start)
-            if isinstance(end, str):
-                end = datetime.fromisoformat(end)
+            start = self._to_datetime(row['time_start'])
+            end = self._to_datetime(row['time_end'] or row['time_start'])
             dur_hours = (end - start).total_seconds() / 3600.0
             month = start.strftime('%Y-%m')
             account = row.get('account') or 'unknown'

@@ -19,5 +19,22 @@ class SlurmDBValidationTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             db._validate_time("not-a-date", "start_time")
 
+    def test_aggregate_usage_handles_int_timestamps(self):
+        db = SlurmDB()
+        db.fetch_usage_records = lambda start, end: [
+            {
+                'account': 'acct',
+                'user_name': 'user',
+                'time_start': 0,
+                'time_end': 3600,
+                'tres_alloc': 'cpu=2,node=1',
+                'mem_req': '1024M',
+            }
+        ]
+        agg = db.aggregate_usage(0, 3600)
+        self.assertIn('1970-01', agg)
+        self.assertAlmostEqual(agg['1970-01']['acct']['core_hours'], 2.0)
+        self.assertAlmostEqual(agg['1970-01']['acct']['instance_hours'], 1.0)
+
 if __name__ == '__main__':
     unittest.main()
