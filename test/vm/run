@@ -1,0 +1,15 @@
+#!/usr/bin/env bash
+# Build and run the test container
+set -e
+
+RUNTIME=${RUNTIME:-}
+if [ -z "$RUNTIME" ]; then
+    if command -v podman >/dev/null 2>&1; then
+        RUNTIME=podman
+    else
+        RUNTIME=docker
+    fi
+fi
+
+$RUNTIME build -t slurmcostmanager-test -f test/vm/Dockerfile .
+$RUNTIME run --rm -v "$(pwd)":/src -w /src slurmcostmanager-test ./test/check-application
