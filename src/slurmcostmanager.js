@@ -9,12 +9,10 @@ function useBillingData() {
     async function load() {
       try {
         let json;
-        if (window.cockpit && window.cockpit.spawn) {
+        if (window.cockpit && window.cockpit.script) {
           const end = new Date();
           const start = new Date(end.getFullYear(), end.getMonth(), 1);
           const args = [
-            'python3',
-            '/usr/share/cockpit/slurmcostmanager/slurmdb.py',
             '--start',
             start.toISOString().slice(0, 10),
             '--end',
@@ -22,7 +20,11 @@ function useBillingData() {
             '--output',
             '-',
           ];
-          const output = await window.cockpit.spawn(args, { err: 'message' });
+          const output = await window.cockpit.script(
+            'slurmdb.py',
+            args,
+            { err: 'message' }
+          );
           json = JSON.parse(output);
         } else {
           const resp = await fetch('billing.json');
