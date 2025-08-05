@@ -31,10 +31,10 @@ class SlurmDBValidationTests(unittest.TestCase):
                 'mem_req': '1024M',
             }
         ]
-        agg = db.aggregate_usage(0, 3600)
+        agg, totals = db.aggregate_usage(0, 3600)
         self.assertIn('1970-01', agg)
         self.assertAlmostEqual(agg['1970-01']['acct']['core_hours'], 2.0)
-        self.assertAlmostEqual(agg['1970-01']['acct']['instance_hours'], 1.0)
+        self.assertAlmostEqual(totals['daily']['1970-01-01'], 2.0)
 
 if __name__ == '__main__':
     unittest.main()

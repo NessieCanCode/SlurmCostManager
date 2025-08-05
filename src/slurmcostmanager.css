@@ -93,6 +93,18 @@ nav button:hover {
   padding: 0.25em 0.5em;
 }
 
+.jobs-table {
+  width: 100%;
+  border-collapse: collapse;
+  margin-top: 0.5em;
+}
+
+.jobs-table th,
+.jobs-table td {
+  border: 1px solid #ccc;
+  padding: 0.25em 0.5em;
+}
+
 .chart-container {
   position: relative;
   height: 300px;
