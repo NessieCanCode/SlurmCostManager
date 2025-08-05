@@ -38,6 +38,15 @@
         }
       },
       "additionalProperties": false
+    },
+    "businessInfo": {
+      "type": "object",
+      "properties": {
+        "name": { "type": "string" },
+        "address": { "type": "string" },
+        "logo": { "type": "string" }
+      },
+      "additionalProperties": false
     }
   },
   "required": ["defaultRate"],

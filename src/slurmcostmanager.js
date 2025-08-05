@@ -111,12 +111,65 @@ function CoreHoursChart({ data, labelKey }) {
 }
 
 function Summary({ summary, details, daily, monthly, yearly }) {
-  function downloadInvoice() {
+  async function downloadInvoice() {
     const pdflib = window.jspdf;
     if (!pdflib || !pdflib.jsPDF) return;
+
+    let business = {};
+    try {
+      let text;
+      if (window.cockpit && window.cockpit.file) {
+        text = await window.cockpit.file(`${PLUGIN_BASE}/rates.json`).read();
+      } else {
+        const resp = await fetch('rates.json');
+        if (resp.ok) text = await resp.text();
+      }
+      if (text) {
+        const cfg = JSON.parse(text);
+        business = cfg.businessInfo || {};
+      }
+    } catch (e) {
+      console.error(e);
+    }
+
     const doc = new pdflib.jsPDF();
-    doc.text(`Invoice for ${summary.period}`, 10, 10);
-    let y = 20;
+    let y = 10;
+
+    if (business.logo) {
+      try {
+        const resp = await fetch(business.logo);
+        if (resp.ok) {
+          const blob = await resp.blob();
+          const dataUrl = await new Promise((resolve, reject) => {
+            const reader = new FileReader();
+            reader.onload = () => resolve(reader.result);
+            reader.onerror = reject;
+            reader.readAsDataURL(blob);
+          });
+          doc.addImage(dataUrl, 'PNG', 10, y, 40, 20);
+          y += 25;
+        }
+      } catch (e) {
+        console.error(e);
+      }
+    }
+
+    doc.setFontSize(16);
+    if (business.name) {
+      doc.text(business.name, 10, y);
+      y += 7;
+    }
+    doc.setFontSize(10);
+    if (business.address) {
+      business.address.split('\n').forEach(line => {
+        doc.text(line, 10, y);
+        y += 5;
+      });
+    }
+    y += 5;
+    doc.setFontSize(12);
+    doc.text(`Invoice for ${summary.period}`, 10, y);
+    y += 10;
     doc.text('Account', 10, y);
     doc.text('Core Hours', 80, y);
     doc.text('Cost ($)', 150, y);
@@ -340,9 +393,10 @@ function Details({ details }) {
 }
 
 
-function Rates({ onRatesUpdated }) {
+function ConfigEditor({ onConfigUpdated }) {
   const [config, setConfig] = useState(null);
   const [overrides, setOverrides] = useState([]);
+  const [business, setBusiness] = useState({ name: '', address: '', logo: '' });
   const [error, setError] = useState(null);
   const [saving, setSaving] = useState(false);
   const [status, setStatus] = useState(null);
@@ -357,12 +411,17 @@ function Rates({ onRatesUpdated }) {
           text = await window.cockpit.file(`${baseDir}/rates.json`).read();
         } else {
           const resp = await fetch('rates.json');
-          if (!resp.ok) throw new Error('Failed to load rates');
+          if (!resp.ok) throw new Error('Failed to load config');
           text = await resp.text();
         }
         if (cancelled) return;
         const json = JSON.parse(text);
         setConfig({ defaultRate: json.defaultRate });
+        setBusiness({
+          name: (json.businessInfo && json.businessInfo.name) || '',
+          address: (json.businessInfo && json.businessInfo.address) || '',
+          logo: (json.businessInfo && json.businessInfo.logo) || ''
+        });
         const ovrs = json.overrides
           ? Object.entries(json.overrides).map(([account, cfg]) => ({
               account,
@@ -373,7 +432,7 @@ function Rates({ onRatesUpdated }) {
         setOverrides(ovrs);
       } catch (e) {
         console.error(e);
-        if (!cancelled) setError('Failed to load rates');
+        if (!cancelled) setError('Failed to load config');
       }
     }
     load();
@@ -402,7 +461,12 @@ function Rates({ onRatesUpdated }) {
       setError(null);
       setStatus(null);
       const json = {
-        defaultRate: parseFloat(config.defaultRate) || 0
+        defaultRate: parseFloat(config.defaultRate) || 0,
+        businessInfo: {
+          name: business.name,
+          address: business.address,
+          logo: business.logo
+        }
       };
       if (overrides.length) {
         json.overrides = {};
@@ -425,10 +489,10 @@ function Rates({ onRatesUpdated }) {
         });
       }
       setStatus('Saved');
-      if (onRatesUpdated) onRatesUpdated();
+      if (onConfigUpdated) onConfigUpdated();
     } catch (e) {
       console.error(e);
-      setError('Failed to save rates');
+      setError('Failed to save config');
     } finally {
       setSaving(false);
     }
@@ -436,27 +500,48 @@ function Rates({ onRatesUpdated }) {
 
   if (error) return React.createElement('p', { className: 'error' }, error);
   if (!config)
-    return React.createElement('p', null, 'Loading rate configuration...');
+    return React.createElement('p', null, 'Loading configuration...');
 
   return React.createElement(
     'div',
-    null,
-    React.createElement('h2', null, 'Rate Configuration'),
+    { className: 'config-section' },
+    React.createElement('h3', null, 'Business Information'),
     React.createElement(
-      'div',
+      'label',
       null,
-      React.createElement(
-        'label',
-        null,
-        'Default Rate ($/core-hour): ',
-        React.createElement('input', {
-          type: 'number',
-          step: '0.001',
-          value: config.defaultRate,
-          onChange: e =>
-            setConfig({ ...config, defaultRate: e.target.value })
-        })
-      )
+      'Name',
+      React.createElement('input', {
+        value: business.name,
+        onChange: e => setBusiness({ ...business, name: e.target.value })
+      })
+    ),
+    React.createElement(
+      'label',
+      null,
+      'Address',
+      React.createElement('textarea', {
+        value: business.address,
+        onChange: e => setBusiness({ ...business, address: e.target.value })
+      })
+    ),
+    React.createElement(
+      'label',
+      null,
+      'Logo Path',
+      React.createElement('input', {
+        value: business.logo,
+        onChange: e => setBusiness({ ...business, logo: e.target.value })
+      })
+    ),
+    React.createElement('h3', null, 'Default Rate'),
+    React.createElement(
+      'input',
+      {
+        type: 'number',
+        step: '0.001',
+        value: config.defaultRate,
+        onChange: e => setConfig({ ...config, defaultRate: e.target.value })
+      }
     ),
     React.createElement('h3', null, 'Account Overrides'),
     React.createElement(
@@ -538,43 +623,63 @@ function Rates({ onRatesUpdated }) {
 
 function App() {
   const [view, setView] = useState('summary');
+  const [settingsOpen, setSettingsOpen] = useState(false);
   const { data, error, reload } = useBillingData();
 
   return React.createElement(
     'div',
     { className: 'app' },
     React.createElement(
-      'nav',
-      null,
+      'div',
+      { className: 'sidebar' },
       React.createElement(
         'button',
-        { onClick: () => setView('summary') },
+        {
+          className: view === 'summary' ? 'active' : '',
+          onClick: () => setView('summary')
+        },
         'Summary'
       ),
       React.createElement(
         'button',
-        { onClick: () => setView('details') },
+        {
+          className: view === 'details' ? 'active' : '',
+          onClick: () => setView('details')
+        },
         'Details'
       ),
       React.createElement(
-        'button',
-        { onClick: () => setView('rates') },
-        'Rates'
+        'div',
+        { className: 'dropdown' },
+        React.createElement(
+          'button',
+          { onClick: () => setSettingsOpen(open => !open) },
+          'Settings'
+        ),
+        settingsOpen &&
+          React.createElement(
+            'div',
+            { className: 'dropdown-menu' },
+            React.createElement(ConfigEditor, { onConfigUpdated: reload })
+          )
       )
     ),
-    view !== 'rates' && !data && !error && React.createElement('p', null, 'Loading...'),
-    view !== 'rates' && error && React.createElement('p', { className: 'error' }, 'Failed to load data'),
-    data &&
-      view === 'summary' &&
-      React.createElement(Summary, {
-        summary: data.summary,
-        details: data.details,
-        daily: data.daily,
-        monthly: data.monthly,
-        yearly: data.yearly
-      }),
-    data && view === 'details' && React.createElement(Details, { details: data.details }),
-    view === 'rates' && React.createElement(Rates, { onRatesUpdated: reload })
+    React.createElement(
+      'div',
+      { className: 'content' },
+      !data && !error && React.createElement('p', null, 'Loading...'),
+      error && React.createElement('p', { className: 'error' }, 'Failed to load data'),
+      data &&
+        view === 'summary' &&
+        React.createElement(Summary, {
+          summary: data.summary,
+          details: data.details,
+          daily: data.daily,
+          monthly: data.monthly,
+          yearly: data.yearly
+        }),
+      data && view === 'details' && React.createElement(Details, { details: data.details })
+    )
   );
 }
 
