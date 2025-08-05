@@ -291,16 +291,28 @@ class SlurmDB:
         except Exception:
             rates_cfg = {}
         default_rate = rates_cfg.get('defaultRate', 0.01)
+        overrides = rates_cfg.get('overrides', {})
+        historical = rates_cfg.get('historicalRates', {})
 
         for month, accounts in usage.items():
+            base_rate = historical.get(month, default_rate)
             for account, vals in accounts.items():
+                ovr = overrides.get(account, {})
+                rate = ovr.get('rate', base_rate)
+                discount = ovr.get('discount', 0)
+                acct_cost = vals['core_hours'] * rate
+                if 0 < discount < 1:
+                    acct_cost *= 1 - discount
                 users = []
-                acct_cost = vals['core_hours'] * default_rate
                 for user, uvals in vals.get('users', {}).items():
-                    u_cost = uvals['core_hours'] * default_rate
+                    u_cost = uvals['core_hours'] * rate
+                    if 0 < discount < 1:
+                        u_cost *= 1 - discount
                     jobs = []
                     for job, jvals in uvals.get('jobs', {}).items():
-                        j_cost = jvals['core_hours'] * default_rate
+                        j_cost = jvals['core_hours'] * rate
+                        if 0 < discount < 1:
+                            j_cost *= 1 - discount
                         jobs.append(
                             {
                                 'job': job,

@@ -1,4 +1,4 @@
-const { useState, useEffect, useRef } = React;
+const { useState, useEffect, useRef, useCallback } = React;
 
 // Determine the directory where the plugin's files are installed. When running
 // inside Cockpit, `window.cockpit.manifest.path` points to the plugin root
@@ -16,44 +16,42 @@ function useBillingData() {
   const [data, setData] = useState(null);
   const [error, setError] = useState(null);
 
-  useEffect(() => {
-    let cancelled = false;
-    async function load() {
-      try {
-        let json;
-        if (window.cockpit && window.cockpit.spawn) {
-          const end = new Date();
-          const start = new Date(end.getFullYear(), end.getMonth(), 1);
-          const args = [
-            'python3',
-            `${PLUGIN_BASE}/slurmdb.py`,
-            '--start',
-            start.toISOString().slice(0, 10),
-            '--end',
-            end.toISOString().slice(0, 10),
-            '--output',
-            '-',
-          ];
-          const output = await window.cockpit.spawn(args, { err: 'message' });
-          json = JSON.parse(output);
-        } else {
-          const resp = await fetch('billing.json');
-          if (!resp.ok) throw new Error('Failed to fetch billing data');
-          json = await resp.json();
-        }
-        if (!cancelled) setData(json);
-      } catch (e) {
-        console.error(e);
-        if (!cancelled) setError(e);
+  const load = useCallback(async () => {
+    try {
+      let json;
+      if (window.cockpit && window.cockpit.spawn) {
+        const end = new Date();
+        const start = new Date(end.getFullYear(), end.getMonth(), 1);
+        const args = [
+          'python3',
+          `${PLUGIN_BASE}/slurmdb.py`,
+          '--start',
+          start.toISOString().slice(0, 10),
+          '--end',
+          end.toISOString().slice(0, 10),
+          '--output',
+          '-',
+        ];
+        const output = await window.cockpit.spawn(args, { err: 'message' });
+        json = JSON.parse(output);
+      } else {
+        const resp = await fetch('billing.json');
+        if (!resp.ok) throw new Error('Failed to fetch billing data');
+        json = await resp.json();
       }
+      setData(json);
+      setError(null);
+    } catch (e) {
+      console.error(e);
+      setError(e);
     }
-    load();
-    return () => {
-      cancelled = true;
-    };
   }, []);
 
-  return { data, error };
+  useEffect(() => {
+    load();
+  }, [load]);
+
+  return { data, error, reload: load };
 }
 
 function AccountsChart({ details }) {
@@ -112,32 +110,29 @@ function CoreHoursChart({ data, labelKey }) {
   );
 }
 
-function Summary({ summary, details, daily, monthly, yearly, invoices }) {
-  async function downloadInvoice() {
-    if (!invoices || !invoices.length) return;
-    const inv = invoices[0];
-    const file = inv.filename || inv.file;
-    if (!file) return;
-    try {
-      let blob;
-      if (window.cockpit && window.cockpit.file) {
-        const raw = await window.cockpit
-          .file(`${PLUGIN_BASE}/invoices/${file}`, { binary: true })
-          .read();
-        blob = new Blob([raw], { type: 'application/pdf' });
-      } else {
-        const resp = await fetch(`invoices/${file}`);
-        blob = await resp.blob();
+function Summary({ summary, details, daily, monthly, yearly }) {
+  function downloadInvoice() {
+    const pdflib = window.jspdf;
+    if (!pdflib || !pdflib.jsPDF) return;
+    const doc = new pdflib.jsPDF();
+    doc.text(`Invoice for ${summary.period}`, 10, 10);
+    let y = 20;
+    doc.text('Account', 10, y);
+    doc.text('Core Hours', 80, y);
+    doc.text('Cost ($)', 150, y);
+    y += 10;
+    details.forEach(d => {
+      doc.text(String(d.account), 10, y);
+      doc.text(String(d.core_hours), 80, y);
+      doc.text(String(d.cost), 150, y);
+      y += 10;
+      if (y > 280) {
+        doc.addPage();
+        y = 10;
       }
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement('a');
-      a.href = url;
-      a.download = file;
-      a.click();
-      URL.revokeObjectURL(url);
-    } catch (e) {
-      console.error(e);
-    }
+    });
+    const safePeriod = summary.period.replace(/[^0-9A-Za-z_-]/g, '');
+    doc.save(`invoice-${safePeriod}.pdf`);
   }
 
   return React.createElement(
@@ -345,7 +340,7 @@ function Details({ details }) {
 }
 
 
-function Rates() {
+function Rates({ onRatesUpdated }) {
   const [config, setConfig] = useState(null);
   const [overrides, setOverrides] = useState([]);
   const [error, setError] = useState(null);
@@ -430,6 +425,7 @@ function Rates() {
         });
       }
       setStatus('Saved');
+      if (onRatesUpdated) onRatesUpdated();
     } catch (e) {
       console.error(e);
       setError('Failed to save rates');
@@ -542,7 +538,7 @@ function Rates() {
 
 function App() {
   const [view, setView] = useState('summary');
-  const { data, error } = useBillingData();
+  const { data, error, reload } = useBillingData();
 
   return React.createElement(
     'div',
@@ -575,11 +571,10 @@ function App() {
         details: data.details,
         daily: data.daily,
         monthly: data.monthly,
-        yearly: data.yearly,
-        invoices: data.invoices
+        yearly: data.yearly
       }),
     data && view === 'details' && React.createElement(Details, { details: data.details }),
-    view === 'rates' && React.createElement(Rates)
+    view === 'rates' && React.createElement(Rates, { onRatesUpdated: reload })
   );
 }
 
