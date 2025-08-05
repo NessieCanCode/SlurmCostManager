@@ -95,7 +95,13 @@ class SlurmDB:
         if isinstance(value, (int, float)):
             return int(value)
         if isinstance(value, str) and self._DATE_RE.match(value):
-            return value
+            # Convert YYYY-MM-DD strings to a UNIX timestamp so comparisons
+            # against numeric time_start/time_end columns work correctly.
+            try:
+                dt = datetime.fromisoformat(value)
+                return int(dt.timestamp())
+            except ValueError:
+                pass
         raise ValueError(f"Invalid {name} format")
 
     def _to_datetime(self, value):
