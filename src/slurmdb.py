@@ -181,7 +181,7 @@ class SlurmDB:
             assoc_table = f"{self.cluster}_assoc_table" if self.cluster else "assoc_table"
             query = (
                 f"SELECT j.id_job AS jobid, j.account, a.user AS user_name, j.time_start, j.time_end, "
-                f"j.tres_alloc FROM {job_table} AS j "
+                f"j.tres_alloc, j.cpus_alloc FROM {job_table} AS j "
                 f"LEFT JOIN {assoc_table} AS a ON j.id_assoc = a.id_assoc "
                 f"WHERE j.time_start >= %s AND j.time_end <= %s"
             )
@@ -204,6 +204,11 @@ class SlurmDB:
             user = row.get('user_name') or 'unknown'
             job = str(row.get('jobid') or 'unknown')
             cpus = self._parse_tres(row.get('tres_alloc'), 'cpu')
+            if not cpus:
+                try:
+                    cpus = float(row.get('cpus_alloc') or 0)
+                except (TypeError, ValueError):
+                    cpus = 0.0
 
             totals['daily'][day] = totals['daily'].get(day, 0.0) + cpus * dur_hours
             totals['monthly'][month] = totals['monthly'].get(month, 0.0) + cpus * dur_hours
