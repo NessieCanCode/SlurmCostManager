@@ -126,6 +126,17 @@ nav button:hover {
   box-sizing: border-box;
 }
 
+.config-section label {
+  display: block;
+  margin-top: 0.5em;
+}
+
+.config-section input,
+.config-section textarea {
+  width: 100%;
+  box-sizing: border-box;
+}
+
 @media (max-width: 600px) {
   nav button {
     display: block;
