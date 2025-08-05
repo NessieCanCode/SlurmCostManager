@@ -174,8 +174,8 @@ class SlurmDB:
             job_table = f"{self.cluster}_job_table" if self.cluster else "job_table"
             assoc_table = f"{self.cluster}_assoc_table" if self.cluster else "assoc_table"
             query = (
-                f"SELECT j.account, a.user AS user_name, j.time_start, j.time_end, "
-                f"j.tres_alloc, j.mem_req FROM {job_table} AS j "
+                f"SELECT j.jobid, j.account, a.user AS user_name, j.time_start, j.time_end, "
+                f"j.tres_alloc FROM {job_table} AS j "
                 f"LEFT JOIN {assoc_table} AS a ON j.id_assoc = a.id_assoc "
                 f"WHERE j.time_start >= %s AND j.time_end <= %s"
             )
@@ -183,38 +183,44 @@ class SlurmDB:
             return cur.fetchall()
 
     def aggregate_usage(self, start_time, end_time):
-        """Aggregate usage metrics by account and month."""
+        """Aggregate usage metrics by account and time period."""
         rows = self.fetch_usage_records(start_time, end_time)
         agg = {}
+        totals = {'daily': {}, 'monthly': {}, 'yearly': {}}
         for row in rows:
             start = self._to_datetime(row['time_start'])
             end = self._to_datetime(row['time_end'] or row['time_start'])
             dur_hours = (end - start).total_seconds() / 3600.0
+            day = start.strftime('%Y-%m-%d')
             month = start.strftime('%Y-%m')
+            year = start.strftime('%Y')
             account = row.get('account') or 'unknown'
             user = row.get('user_name') or 'unknown'
+            job = str(row.get('jobid') or 'unknown')
             cpus = self._parse_tres(row.get('tres_alloc'), 'cpu')
-            nodes = self._parse_tres(row.get('tres_alloc'), 'node')
-            mem_gb = self._parse_mem(row.get('mem_req'))
+
+            totals['daily'][day] = totals['daily'].get(day, 0.0) + cpus * dur_hours
+            totals['monthly'][month] = totals['monthly'].get(month, 0.0) + cpus * dur_hours
+            totals['yearly'][year] = totals['yearly'].get(year, 0.0) + cpus * dur_hours
 
             month_entry = agg.setdefault(month, {})
             acct_entry = month_entry.setdefault(
                 account,
                 {
                     'core_hours': 0.0,
-                    'instance_hours': 0.0,
-                    'gb_month': 0.0,
                     'users': {},
                 },
             )
             acct_entry['core_hours'] += cpus * dur_hours
-            acct_entry['instance_hours'] += nodes * dur_hours
-            acct_entry['gb_month'] += mem_gb * dur_hours / (24.0 * 30.0)
             user_entry = acct_entry['users'].setdefault(
-                user, {'core_hours': 0.0}
+                user, {'core_hours': 0.0, 'jobs': {}}
             )
             user_entry['core_hours'] += cpus * dur_hours
-        return agg
+            job_entry = user_entry['jobs'].setdefault(
+                job, {'core_hours': 0.0}
+            )
+            job_entry['core_hours'] += cpus * dur_hours
+        return agg, totals
 
     def fetch_invoices(self, start_date=None, end_date=None):
         """Fetch invoice metadata from the database if present."""
@@ -247,11 +253,16 @@ class SlurmDB:
         ]
 
     def export_summary(self, start_time, end_time):
-        usage = self.aggregate_usage(start_time, end_time)
-        summary = {'summary': {}, 'details': [], 'invoices': []}
+        usage, totals = self.aggregate_usage(start_time, end_time)
+        summary = {
+            'summary': {},
+            'details': [],
+            'daily': [],
+            'monthly': [],
+            'yearly': [],
+            'invoices': [],
+        }
         total_ch = 0.0
-        total_ih = 0.0
-        total_gbm = 0.0
         total_cost = 0.0
 
         rates_path = os.path.join(os.path.dirname(__file__), 'rates.json')
@@ -268,36 +279,61 @@ class SlurmDB:
                 acct_cost = vals['core_hours'] * default_rate
                 for user, uvals in vals.get('users', {}).items():
                     u_cost = uvals['core_hours'] * default_rate
-                    users.append({
-                        'user': user,
-                        'core_hours': round(uvals['core_hours'], 2),
-                        'cost': round(u_cost, 2),
-                    })
+                    jobs = []
+                    for job, jvals in uvals.get('jobs', {}).items():
+                        j_cost = jvals['core_hours'] * default_rate
+                        jobs.append(
+                            {
+                                'job': job,
+                                'core_hours': round(jvals['core_hours'], 2),
+                                'cost': round(j_cost, 2),
+                            }
+                        )
+                    users.append(
+                        {
+                            'user': user,
+                            'core_hours': round(uvals['core_hours'], 2),
+                            'cost': round(u_cost, 2),
+                            'jobs': jobs,
+                        }
+                    )
                 summary['details'].append(
                     {
                         'account': account,
                         'core_hours': round(vals['core_hours'], 2),
-                        'instance_hours': round(vals['instance_hours'], 2),
-                        'gb_month': round(vals['gb_month'], 2),
                         'cost': round(acct_cost, 2),
                         'users': users,
                     }
                 )
                 total_ch += vals['core_hours']
-                total_ih += vals['instance_hours']
-                total_gbm += vals['gb_month']
                 total_cost += acct_cost
+        start_dt = (
+            datetime.fromisoformat(start_time)
+            if isinstance(start_time, str)
+            else datetime.fromtimestamp(start_time)
+        )
+        end_dt = (
+            datetime.fromisoformat(end_time)
+            if isinstance(end_time, str)
+            else datetime.fromtimestamp(end_time)
+        )
         summary['summary'] = {
-            'month': (
-                datetime.fromisoformat(start_time)
-                if isinstance(start_time, str)
-                else datetime.fromtimestamp(start_time)
-            ).strftime('%B %Y'),
+            'period': f"{start_dt.strftime('%Y-%m-%d')} to {end_dt.strftime('%Y-%m-%d')}",
             'total': round(total_cost, 2),
             'core_hours': round(total_ch, 2),
-            'instance_hours': round(total_ih, 2),
-            'gb_month': round(total_gbm, 2),
         }
+        summary['daily'] = [
+            {'date': d, 'core_hours': round(v, 2)}
+            for d, v in sorted(totals['daily'].items())
+        ]
+        summary['monthly'] = [
+            {'month': m, 'core_hours': round(v, 2)}
+            for m, v in sorted(totals['monthly'].items())
+        ]
+        summary['yearly'] = [
+            {'year': y, 'core_hours': round(v, 2)}
+            for y, v in sorted(totals['yearly'].items())
+        ]
         summary['invoices'] = self.fetch_invoices(start_time, end_time)
         return summary
 

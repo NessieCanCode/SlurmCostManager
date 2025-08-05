@@ -84,11 +84,66 @@ function AccountsChart({ details }) {
   );
 }
 
-function Summary({ summary, details }) {
+function CoreHoursChart({ data, labelKey }) {
+  const canvasRef = useRef(null);
+  useEffect(() => {
+    if (!canvasRef.current) return;
+    const ctx = canvasRef.current.getContext('2d');
+    const chart = new Chart(ctx, {
+      type: 'bar',
+      data: {
+        labels: data.map(d => d[labelKey]),
+        datasets: [
+          {
+            label: 'Core Hours',
+            data: data.map(d => d.core_hours),
+            backgroundColor: '#4e79a7'
+          }
+        ]
+      },
+      options: { responsive: true, maintainAspectRatio: false }
+    });
+    return () => chart.destroy();
+  }, [data, labelKey]);
+  return React.createElement(
+    'div',
+    { className: 'chart-container' },
+    React.createElement('canvas', { ref: canvasRef })
+  );
+}
+
+function Summary({ summary, details, daily, monthly, yearly, invoices }) {
+  async function downloadInvoice() {
+    if (!invoices || !invoices.length) return;
+    const inv = invoices[0];
+    const file = inv.filename || inv.file;
+    if (!file) return;
+    try {
+      let blob;
+      if (window.cockpit && window.cockpit.file) {
+        const raw = await window.cockpit
+          .file(`${PLUGIN_BASE}/invoices/${file}`, { binary: true })
+          .read();
+        blob = new Blob([raw], { type: 'application/pdf' });
+      } else {
+        const resp = await fetch(`invoices/${file}`);
+        blob = await resp.blob();
+      }
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = file;
+      a.click();
+      URL.revokeObjectURL(url);
+    } catch (e) {
+      console.error(e);
+    }
+  }
+
   return React.createElement(
     'div',
     null,
-    React.createElement('h2', null, 'Monthly Billing Summary'),
+    React.createElement('h2', null, 'Billing Summary'),
     React.createElement(
       'div',
       { className: 'table-container' },
@@ -101,8 +156,8 @@ function Summary({ summary, details }) {
           React.createElement(
             'tr',
             null,
-            React.createElement('th', null, 'Month'),
-            React.createElement('td', null, summary.month)
+            React.createElement('th', null, 'Period'),
+            React.createElement('td', null, summary.period)
           ),
           React.createElement(
             'tr',
@@ -113,86 +168,114 @@ function Summary({ summary, details }) {
           React.createElement(
             'tr',
             null,
-            React.createElement('th', null, 'Core Hours'),
+            React.createElement('th', null, 'Total Core Hours'),
             React.createElement('td', null, summary.core_hours)
-          ),
-          React.createElement(
-            'tr',
-            null,
-            React.createElement('th', null, 'Instance Hours'),
-            React.createElement('td', null, summary.instance_hours)
-          ),
-          React.createElement(
-            'tr',
-            null,
-            React.createElement('th', null, 'GB-Month'),
-            React.createElement('td', null, summary.gb_month)
-          )
-        )
-      )
-    ),
-    React.createElement('h3', null, 'Core Hours by Account'),
-    React.createElement(AccountsChart, { details })
-  );
-}
-
-function UserDetails({ users }) {
-  const canvasRef = useRef(null);
-  useEffect(() => {
-    if (!canvasRef.current) return;
-    const ctx = canvasRef.current.getContext('2d');
-    const chart = new Chart(ctx, {
-      type: 'bar',
-      data: {
-        labels: users.map(u => u.user),
-        datasets: [
-          {
-            label: 'Core Hours',
-            data: users.map(u => u.core_hours),
-            backgroundColor: '#59a14f'
-          }
-        ]
-      },
-      options: { responsive: true, maintainAspectRatio: false }
-    });
-    return () => chart.destroy();
-  }, [users]);
-
-  return React.createElement(
-    'div',
-    null,
-    React.createElement(
-      'table',
-      { className: 'users-table' },
-      React.createElement(
-        'thead',
-        null,
-        React.createElement(
-          'tr',
-          null,
-          React.createElement('th', null, 'User'),
-          React.createElement('th', null, 'Core Hours'),
-          React.createElement('th', null, 'Cost ($)')
-        )
-      ),
-      React.createElement(
-        'tbody',
-        null,
-        users.map((u, i) =>
-          React.createElement(
-            'tr',
-            { key: i },
-            React.createElement('td', null, u.user),
-            React.createElement('td', null, u.core_hours),
-            React.createElement('td', null, u.cost)
           )
         )
       )
     ),
     React.createElement(
       'div',
-      { className: 'chart-container' },
-      React.createElement('canvas', { ref: canvasRef })
+      { style: { margin: '1em 0' } },
+      React.createElement(
+        'button',
+        { onClick: downloadInvoice },
+        'Download Invoice'
+      )
+    ),
+    React.createElement('h3', null, 'Daily Core Hours'),
+    React.createElement(CoreHoursChart, { data: daily, labelKey: 'date' }),
+    React.createElement('h3', null, 'Monthly Core Hours'),
+    React.createElement(CoreHoursChart, { data: monthly, labelKey: 'month' }),
+    React.createElement('h3', null, 'Yearly Core Hours'),
+    React.createElement(CoreHoursChart, { data: yearly, labelKey: 'year' }),
+    React.createElement('h3', null, 'Core Hours by Account'),
+    React.createElement(AccountsChart, { details })
+  );
+}
+
+function JobDetails({ jobs }) {
+  return React.createElement(
+    'table',
+    { className: 'jobs-table' },
+    React.createElement(
+      'thead',
+      null,
+      React.createElement(
+        'tr',
+        null,
+        React.createElement('th', null, 'Job'),
+        React.createElement('th', null, 'Core Hours'),
+        React.createElement('th', null, 'Cost ($)')
+      )
+    ),
+    React.createElement(
+      'tbody',
+      null,
+      jobs.map((j, i) =>
+        React.createElement(
+          'tr',
+          { key: i },
+          React.createElement('td', null, j.job),
+          React.createElement('td', null, j.core_hours),
+          React.createElement('td', null, j.cost)
+        )
+      )
+    )
+  );
+}
+
+function UserDetails({ users }) {
+  const [expanded, setExpanded] = useState(null);
+  function toggle(user) {
+    setExpanded(prev => (prev === user ? null : user));
+  }
+  return React.createElement(
+    'table',
+    { className: 'users-table' },
+    React.createElement(
+      'thead',
+      null,
+      React.createElement(
+        'tr',
+        null,
+        React.createElement('th', null, 'User'),
+        React.createElement('th', null, 'Core Hours'),
+        React.createElement('th', null, 'Cost ($)')
+      )
+    ),
+    React.createElement(
+      'tbody',
+      null,
+      users.reduce((acc, u) => {
+        acc.push(
+          React.createElement(
+            'tr',
+            {
+              key: u.user,
+              className: 'clickable',
+              onClick: () => toggle(u.user)
+            },
+            React.createElement('td', null, u.user),
+            React.createElement('td', null, u.core_hours),
+            React.createElement('td', null, u.cost)
+          )
+        );
+        if (expanded === u.user) {
+          acc.push(
+            React.createElement(
+              'tr',
+              { key: u.user + '-jobs' },
+              React.createElement(
+                'td',
+                { colSpan: 3 },
+                React.createElement(JobDetails, { jobs: u.jobs || [] })
+              )
+            )
+          );
+        }
+        return acc;
+      }, [])
     )
   );
 }
@@ -220,8 +303,6 @@ function Details({ details }) {
             null,
             React.createElement('th', null, 'Account'),
             React.createElement('th', null, 'Core Hours'),
-            React.createElement('th', null, 'Instance Hours'),
-            React.createElement('th', null, 'GB-Month'),
             React.createElement('th', null, 'Cost ($)')
           )
         ),
@@ -239,8 +320,6 @@ function Details({ details }) {
                 },
                 React.createElement('td', null, d.account),
                 React.createElement('td', null, d.core_hours),
-                React.createElement('td', null, d.instance_hours),
-                React.createElement('td', null, d.gb_month),
                 React.createElement('td', null, d.cost)
               )
             );
@@ -251,7 +330,7 @@ function Details({ details }) {
                   { key: d.account + '-users' },
                   React.createElement(
                     'td',
-                    { colSpan: 5 },
+                    { colSpan: 3 },
                     React.createElement(UserDetails, { users: d.users || [] })
                   )
                 )
@@ -265,108 +344,6 @@ function Details({ details }) {
   );
 }
 
-function Invoices({ invoices }) {
-  const [selected, setSelected] = useState(null);
-  const [urls, setUrls] = useState({});
-  const [list, setList] = useState(invoices);
-  const [loading, setLoading] = useState(false);
-  const [invError, setInvError] = useState(null);
-
-  const baseDir = `${PLUGIN_BASE}/invoices`;
-
-  async function loadInvoice(file) {
-    if (file.includes('..') || file.includes('/')) {
-      throw new Error('Invalid invoice filename');
-    }
-    let blob;
-    if (window.cockpit && window.cockpit.file) {
-      const raw = await window.cockpit
-        .file(`${baseDir}/${file}`, { binary: true })
-        .read();
-      blob = new Blob([raw], { type: 'application/pdf' });
-    } else {
-      const resp = await fetch(`invoices/${file}`);
-      blob = await resp.blob();
-    }
-    return URL.createObjectURL(blob);
-  }
-
-  async function ensureUrl(file) {
-    if (urls[file]) return urls[file];
-    const url = await loadInvoice(file);
-    setUrls(prev => ({ ...prev, [file]: url }));
-    return url;
-  }
-
-  function handleView(inv) {
-    setLoading(true);
-    setInvError(null);
-    ensureUrl(inv.filename)
-      .then(url => setSelected(url))
-      .catch(e => {
-        console.error(e);
-        setInvError('Failed to load invoice');
-      })
-      .finally(() => setLoading(false));
-  }
-
-  function handleDownload(inv) {
-    ensureUrl(inv.filename).then(url => {
-      const a = document.createElement('a');
-      a.href = url;
-      a.download = inv.filename;
-      a.click();
-    });
-  }
-
-  function handleArchive(id) {
-    setList(prev => prev.map(inv => (inv.id === id ? { ...inv, archived: true } : inv)));
-  }
-
-  return React.createElement(
-    'div',
-    null,
-    React.createElement('h2', null, 'Invoices'),
-    React.createElement(
-      'ul',
-      { className: 'invoice-list' },
-      list
-        .filter(inv => !inv.archived)
-        .map(inv =>
-          React.createElement(
-            'li',
-            { key: inv.id },
-            `${inv.date} (${(inv.size / 1024).toFixed(1)} KB)`,
-            ' ',
-            React.createElement(
-              'button',
-              { className: 'link-btn', onClick: () => handleView(inv) },
-              'View'
-            ),
-            ' | ',
-            React.createElement(
-              'button',
-              { className: 'link-btn', onClick: () => handleDownload(inv) },
-              'Download'
-            ),
-            ' | ',
-            React.createElement(
-              'button',
-              { className: 'link-btn', onClick: () => handleArchive(inv.id) },
-              'Archive'
-            )
-          )
-        )
-    ),
-    loading && React.createElement('p', null, 'Loading invoice...'),
-    invError && React.createElement('p', { className: 'error' }, invError),
-    selected && !loading && !invError &&
-      React.createElement('iframe', {
-        src: selected,
-        className: 'invoice-frame'
-      })
-  );
-}
 
 function Rates() {
   const [config, setConfig] = useState(null);
@@ -585,11 +562,6 @@ function App() {
       ),
       React.createElement(
         'button',
-        { onClick: () => setView('invoices') },
-        'Invoices'
-      ),
-      React.createElement(
-        'button',
         { onClick: () => setView('rates') },
         'Rates'
       )
@@ -598,13 +570,15 @@ function App() {
     view !== 'rates' && error && React.createElement('p', { className: 'error' }, 'Failed to load data'),
     data &&
       view === 'summary' &&
-      React.createElement(Summary, { summary: data.summary, details: data.details }),
-    data &&
-      view === 'details' &&
-      React.createElement(Details, { details: data.details }),
-    data &&
-      view === 'invoices' &&
-      React.createElement(Invoices, { invoices: data.invoices }),
+      React.createElement(Summary, {
+        summary: data.summary,
+        details: data.details,
+        daily: data.daily,
+        monthly: data.monthly,
+        yearly: data.yearly,
+        invoices: data.invoices
+      }),
+    data && view === 'details' && React.createElement(Details, { details: data.details }),
     view === 'rates' && React.createElement(Rates)
   );
 }

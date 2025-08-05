@@ -9,16 +9,18 @@ class BillingSummaryTests(unittest.TestCase):
             '2023-10': {
                 'acct': {
                     'core_hours': 10.0,
-                    'instance_hours': 5.0,
-                    'gb_month': 1.0,
                     'users': {
-                        'user1': {'core_hours': 10.0},
+                        'user1': {'core_hours': 10.0, 'jobs': {}}
                     },
                 }
             }
         }
         invoices = [{'file': 'inv1.pdf', 'date': '2023-10-01'}]
-        with mock.patch.object(SlurmDB, 'aggregate_usage', return_value=usage):
+        with mock.patch.object(
+            SlurmDB,
+            'aggregate_usage',
+            return_value=(usage, {'daily': {}, 'monthly': {}, 'yearly': {}}),
+        ):
             with mock.patch.object(SlurmDB, 'fetch_invoices', return_value=invoices):
                 db = SlurmDB()
                 summary = db.export_summary('2023-10-01', '2023-10-31')
