@@ -1,4 +1,9 @@
 {
+  "businessInfo": {
+    "name": "Your Company",
+    "address": "123 Business Rd\nCity, ST 00000",
+    "logo": ""
+  },
   "defaultRate": 0.02,
   "historicalRates": {
     "2024-01": 0.015
