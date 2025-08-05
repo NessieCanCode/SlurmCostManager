@@ -42,5 +42,20 @@ class SlurmDBValidationTests(unittest.TestCase):
         self.assertAlmostEqual(agg['1970-01']['acct']['core_hours'], 2.0)
         self.assertAlmostEqual(totals['daily']['1970-01-01'], 2.0)
 
+    def test_cpus_alloc_fallback(self):
+        db = SlurmDB()
+        db.fetch_usage_records = lambda start, end: [
+            {
+                'account': 'acct',
+                'user_name': 'user',
+                'time_start': 0,
+                'time_end': 3600,
+                'tres_alloc': '',
+                'cpus_alloc': 2,
+            }
+        ]
+        agg, totals = db.aggregate_usage(0, 3600)
+        self.assertAlmostEqual(agg['1970-01']['acct']['core_hours'], 2.0)
+
 if __name__ == '__main__':
     unittest.main()
