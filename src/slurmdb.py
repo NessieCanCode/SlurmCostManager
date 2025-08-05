@@ -179,9 +179,17 @@ class SlurmDB:
         with self._conn.cursor() as cur:
             job_table = f"{self.cluster}_job_table" if self.cluster else "job_table"
             assoc_table = f"{self.cluster}_assoc_table" if self.cluster else "assoc_table"
+
+            # Determine which CPU column exists. Older Slurm installations
+            # expose ``cpus_alloc`` while newer ones only provide ``cpus_req``.
+            cpu_col = "cpus_alloc"
+            cur.execute(f"SHOW COLUMNS FROM {job_table} LIKE %s", (cpu_col,))
+            if not cur.fetchone():
+                cpu_col = "cpus_req"
+
             query = (
                 f"SELECT j.id_job AS jobid, j.account, a.user AS user_name, j.time_start, j.time_end, "
-                f"j.tres_alloc, j.cpus_alloc FROM {job_table} AS j "
+                f"j.tres_alloc, j.{cpu_col} AS cpus_alloc FROM {job_table} AS j "
                 f"LEFT JOIN {assoc_table} AS a ON j.id_assoc = a.id_assoc "
                 f"WHERE j.time_start >= %s AND j.time_end <= %s"
             )

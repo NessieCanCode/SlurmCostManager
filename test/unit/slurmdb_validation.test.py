@@ -1,5 +1,6 @@
 import unittest
 from slurmdb import SlurmDB
+from slurm_schema import extract_schema_from_dump
 
 class SlurmDBValidationTests(unittest.TestCase):
     def test_invalid_cluster_rejected(self):
@@ -56,6 +57,51 @@ class SlurmDBValidationTests(unittest.TestCase):
         ]
         agg, totals = db.aggregate_usage(0, 3600)
         self.assertAlmostEqual(agg['1970-01']['acct']['core_hours'], 2.0)
+
+    def test_fetch_usage_records_uses_cpus_req_if_alloc_missing(self):
+        schema = extract_schema_from_dump('test/test_db_dump.sql')
+        job_cols = schema.get('localcluster_job_table', [])
+
+        class FakeCursor:
+            def __init__(self):
+                self.queries = []
+
+            def execute(self, query, params=None):
+                self.queries.append(query)
+                if query.lower().startswith("show columns"):
+                    column = params[0] if params else None
+                    if column in job_cols:
+                        self._fetchone = {'Field': column}
+                    else:
+                        self._fetchone = None
+                else:
+                    self._fetchall = []
+
+            def fetchone(self):
+                return getattr(self, "_fetchone", None)
+
+            def fetchall(self):
+                return getattr(self, "_fetchall", [])
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, exc_type, exc, tb):
+                pass
+
+        class FakeConn:
+            def __init__(self):
+                self.cursor_obj = FakeCursor()
+
+            def cursor(self):
+                return self.cursor_obj
+
+        db = SlurmDB(cluster="localcluster")
+        db._conn = FakeConn()
+        db.connect = lambda: None
+        db.fetch_usage_records(0, 0)
+        queries = db._conn.cursor_obj.queries
+        self.assertIn("j.cpus_req AS cpus_alloc", queries[1])
 
 if __name__ == '__main__':
     unittest.main()
