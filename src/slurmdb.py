@@ -95,7 +95,10 @@ class SlurmDB:
         if isinstance(value, (int, float)):
             return int(value)
         if isinstance(value, str) and self._DATE_RE.match(value):
-            return value
+            dt = datetime.fromisoformat(value)
+            if name in ("end_time", "end_date"):
+                dt = dt.replace(hour=23, minute=59, second=59)
+            return int(dt.timestamp())
         raise ValueError(f"Invalid {name} format")
 
     def _to_datetime(self, value):

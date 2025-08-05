@@ -19,6 +19,13 @@ class SlurmDBValidationTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             db._validate_time("not-a-date", "start_time")
 
+    def test_validate_time_converts_dates(self):
+        db = SlurmDB()
+        start = db._validate_time("1970-01-02", "start_time")
+        end = db._validate_time("1970-01-02", "end_time")
+        self.assertEqual(start, 86400)
+        self.assertEqual(end, 172799)
+
     def test_aggregate_usage_handles_int_timestamps(self):
         db = SlurmDB()
         db.fetch_usage_records = lambda start, end: [
