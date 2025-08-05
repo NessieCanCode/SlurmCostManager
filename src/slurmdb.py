@@ -174,7 +174,7 @@ class SlurmDB:
             job_table = f"{self.cluster}_job_table" if self.cluster else "job_table"
             assoc_table = f"{self.cluster}_assoc_table" if self.cluster else "assoc_table"
             query = (
-                f"SELECT j.jobid, j.account, a.user AS user_name, j.time_start, j.time_end, "
+                f"SELECT j.id_job AS jobid, j.account, a.user AS user_name, j.time_start, j.time_end, "
                 f"j.tres_alloc FROM {job_table} AS j "
                 f"LEFT JOIN {assoc_table} AS a ON j.id_assoc = a.id_assoc "
                 f"WHERE j.time_start >= %s AND j.time_end <= %s"
