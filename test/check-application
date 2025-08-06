@@ -4,6 +4,7 @@ set -e
 
 # unit tests
 node test/unit/calculator.test.js
+node test/unit/date_boundaries.test.js
 PYTHONPATH=src python test/unit/slurmdb_validation.test.py
 PYTHONPATH=src python test/unit/slurm_schema_dump.test.py
 PYTHONPATH=src python test/unit/billing_summary.test.py

@@ -12,6 +12,15 @@ const PLUGIN_BASE =
     window.cockpit.manifest.path) ||
   '/usr/share/cockpit/slurmcostmanager';
 
+function getBillingPeriod(now = new Date()) {
+  const end = new Date(Date.UTC(now.getFullYear(), now.getMonth(), now.getDate()));
+  const start = new Date(Date.UTC(now.getFullYear(), now.getMonth(), 1));
+  return {
+    start: start.toISOString().slice(0, 10),
+    end: end.toISOString().slice(0, 10)
+  };
+}
+
 function useBillingData() {
   const [data, setData] = useState(null);
   const [error, setError] = useState(null);
@@ -20,15 +29,14 @@ function useBillingData() {
     try {
       let json;
       if (window.cockpit && window.cockpit.spawn) {
-        const end = new Date();
-        const start = new Date(end.getFullYear(), end.getMonth(), 1);
+        const { start, end } = getBillingPeriod();
         const args = [
           'python3',
           `${PLUGIN_BASE}/slurmdb.py`,
           '--start',
-          start.toISOString().slice(0, 10),
+          start,
           '--end',
-          end.toISOString().slice(0, 10),
+          end,
           '--output',
           '-',
         ];
@@ -605,6 +613,12 @@ function App() {
   );
 }
 
-ReactDOM.createRoot(document.getElementById('root')).render(
-  React.createElement(React.StrictMode, null, React.createElement(App))
-);
+if (typeof document !== 'undefined') {
+  ReactDOM.createRoot(document.getElementById('root')).render(
+    React.createElement(React.StrictMode, null, React.createElement(App))
+  );
+}
+
+if (typeof module !== 'undefined') {
+  module.exports = { getBillingPeriod };
+}
