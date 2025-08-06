@@ -280,11 +280,24 @@ class SlurmDB:
         return agg, totals
 
     def fetch_invoices(self, start_date=None, end_date=None):
-        """Fetch invoice metadata from the database if present."""
+        """Fetch invoice metadata from the database if present.
+
+        Each invoice entry is validated against ``invoice-schema.json``.
+        Invalid records are logged and skipped.
+        """
         if start_date:
             start_date = self._validate_time(start_date, "start_date")
         if end_date:
             end_date = self._validate_time(end_date, "end_date")
+
+        schema_path = os.path.join(os.path.dirname(__file__), "invoice-schema.json")
+        try:
+            with open(schema_path) as sfh:
+                schema = json.load(sfh)
+        except OSError as e:
+            logging.error("Failed to read invoice schema %s: %s", schema_path, e)
+            return []
+
         self.connect()
         with self._conn.cursor() as cur:
             cur.execute("SHOW TABLES LIKE 'invoices'")
@@ -293,21 +306,32 @@ class SlurmDB:
 
             if start_date and end_date:
                 query = (
-                    "SELECT file, invoice_date FROM invoices "
+                    "SELECT id, file, invoice_date, size, archived FROM invoices "
                     "WHERE invoice_date >= %s AND invoice_date <= %s"
                 )
                 cur.execute(query, (start_date, end_date))
             else:
-                query = "SELECT file, invoice_date FROM invoices"
+                query = "SELECT id, file, invoice_date, size, archived FROM invoices"
                 cur.execute(query)
             rows = cur.fetchall()
-        return [
-            {
-                'file': r.get('file'),
-                'date': r.get('invoice_date'),
+
+        invoices = []
+        for r in rows:
+            inv = {
+                "id": r.get("id"),
+                "filename": r.get("file"),
+                "date": r.get("invoice_date"),
             }
-            for r in rows
-        ]
+            if r.get("size") is not None:
+                inv["size"] = r.get("size")
+            if r.get("archived") is not None:
+                inv["archived"] = r.get("archived")
+            try:
+                jsonschema.validate(inv, schema)
+                invoices.append(inv)
+            except jsonschema.ValidationError as e:
+                logging.warning("Invalid invoice record skipped: %s", e.message)
+        return invoices
 
     def export_summary(self, start_time, end_time):
         """Export a summary of usage and costs.
