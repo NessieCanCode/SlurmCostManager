@@ -11,7 +11,8 @@ This repository now includes a responsive Cockpit UI built with React.  The inte
 - **Detailed cost drill-downs** (core‑hours, instance‑hours, GB‑month) for per‑account transparency.
 - **Historical billing data** accessible from account inception for auditing and trend analysis.
 - **Organization-wide views** consolidating charges across all member Slurm accounts.
-- **Configurable settings** page to manage rates, business information, and invoice branding.
+- **Full-screen sidebar navigation** with an integrated settings dropdown to manage rates, business information, and invoice branding.
+
 
 
 ## 📁 Project Structure
