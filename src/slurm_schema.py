@@ -15,7 +15,7 @@ def extract_schema(db: SlurmDB):
     """Return mapping of table names to column lists using a live DB."""
     db.connect()
     schema = {}
-    with db._conn.cursor() as cur:
+    with db.cursor() as cur:
         cur.execute("SHOW TABLES")
         table_key = f"Tables_in_{db.database}"
         tables = [row[table_key] for row in cur.fetchall()]
@@ -31,21 +31,24 @@ def extract_schema_from_dump(path: str):
     table_re = re.compile(r'^CREATE TABLE `([^`]+)`')
     col_re = re.compile(r'^\s*`([^`]+)`')
     current = None
-    with open(path) as fh:
-        for line in fh:
-            line = line.strip()
-            m = table_re.match(line)
-            if m:
-                current = m.group(1)
-                schema[current] = []
-                continue
-            if current:
-                if line.startswith(')'):
-                    current = None
+    try:
+        with open(path) as fh:
+            for line in fh:
+                line = line.strip()
+                m = table_re.match(line)
+                if m:
+                    current = m.group(1)
+                    schema[current] = []
                     continue
-                cm = col_re.match(line)
-                if cm:
-                    schema[current].append(cm.group(1))
+                if current:
+                    if line.startswith(')'):
+                        current = None
+                        continue
+                    cm = col_re.match(line)
+                    if cm:
+                        schema[current].append(cm.group(1))
+    except OSError as e:
+        raise FileNotFoundError(f"Unable to read dump file {path}: {e}") from e
     return schema
 
 
