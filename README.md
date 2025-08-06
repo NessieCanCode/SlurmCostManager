@@ -96,10 +96,6 @@ override any values found in the configuration file. The cluster prefix used to
 select the job tables is determined from `/etc/slurm/slurm.conf` but can be set
 using `SLURM_CLUSTER`, `--cluster` or `--slurm-conf`.
 
-The `SlurmDB` helper also accepts a `connect_timeout` argument that specifies
-how long to wait when establishing the database connection. If omitted, it
-defaults to 10 seconds.
-
 
 ```bash
 python3 src/slurmdb.py --start 2024-06-01 --end 2024-06-30 --output billing.json
