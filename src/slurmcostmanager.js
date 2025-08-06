@@ -401,19 +401,46 @@ function Rates({ onRatesUpdated }) {
       setSaving(true);
       setError(null);
       setStatus(null);
-      const json = {
-        defaultRate: parseFloat(config.defaultRate) || 0
-      };
+
+      const defaultRate = parseFloat(config.defaultRate);
+      if (!Number.isFinite(defaultRate)) {
+        console.warn('Invalid default rate:', config.defaultRate);
+        setError('Invalid default rate');
+        return;
+      }
+
+      const json = { defaultRate };
+
       if (overrides.length) {
-        json.overrides = {};
+        const overridesJson = {};
         overrides.forEach(o => {
           if (!o.account) return;
           const entry = {};
-          if (o.rate !== '') entry.rate = parseFloat(o.rate);
-          if (o.discount !== '') entry.discount = parseFloat(o.discount);
-          json.overrides[o.account] = entry;
+          if (o.rate !== '') {
+            const rate = parseFloat(o.rate);
+            if (Number.isFinite(rate)) {
+              entry.rate = rate;
+            } else {
+              console.warn(`Ignoring invalid rate for account ${o.account}:`, o.rate);
+            }
+          }
+          if (o.discount !== '') {
+            const discount = parseFloat(o.discount);
+            if (Number.isFinite(discount)) {
+              entry.discount = discount;
+            } else {
+              console.warn(
+                `Ignoring invalid discount for account ${o.account}:`,
+                o.discount
+              );
+            }
+          }
+          if (Object.keys(entry).length) overridesJson[o.account] = entry;
         });
+        if (Object.keys(overridesJson).length)
+          json.overrides = overridesJson;
       }
+
       const text = JSON.stringify(json, null, 2);
       if (window.cockpit && window.cockpit.file) {
         await window.cockpit.file(`${baseDir}/rates.json`).replace(text);
