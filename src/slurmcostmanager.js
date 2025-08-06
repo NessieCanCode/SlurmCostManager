@@ -3,6 +3,8 @@ const { useState, useEffect, useRef, useCallback } = React;
 const ReactDOM = require('react-dom/client');
 const Chart = require('chart.js/auto');
 const { jsPDF } = require('jspdf');
+require('bootstrap/dist/css/bootstrap.min.css');
+require('bootstrap/dist/js/bootstrap.bundle.min.js');
 if (typeof document !== 'undefined') {
   require('./slurmcostmanager.css');
 }
