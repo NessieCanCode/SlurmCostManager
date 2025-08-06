@@ -13,7 +13,6 @@ from slurmdb import SlurmDB
 
 def extract_schema(db: SlurmDB):
     """Return mapping of table names to column lists using a live DB."""
-    db.connect()
     schema = {}
     with db.cursor() as cur:
         cur.execute("SHOW TABLES")
@@ -66,8 +65,12 @@ def main():
     else:
         if pymysql is None:
             raise RuntimeError('pymysql is required but not installed')
-        db = SlurmDB(config_file=args.conf, cluster=args.cluster, slurm_conf=args.slurm_conf)
-        schema = extract_schema(db)
+        with SlurmDB(
+            config_file=args.conf,
+            cluster=args.cluster,
+            slurm_conf=args.slurm_conf,
+        ) as db:
+            schema = extract_schema(db)
 
     with open(args.output, 'w') as fh:
         json.dump(schema, fh, indent=2)

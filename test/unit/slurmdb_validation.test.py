@@ -1,6 +1,6 @@
 import unittest
 from slurmdb import SlurmDB
-from slurm_schema import extract_schema_from_dump
+from slurm_schema import extract_schema_from_dump, extract_schema
 
 class SlurmDBValidationTests(unittest.TestCase):
     def test_invalid_cluster_rejected(self):
@@ -99,6 +99,52 @@ class SlurmDBValidationTests(unittest.TestCase):
             self.assertIs(ctx, db)
             self.assertIsNotNone(db._conn)
             conn = db._conn
+
+        self.assertTrue(conn.closed)
+        self.assertIsNone(db._conn)
+
+    def test_extract_schema_with_context_manager_closes_connection(self):
+        class FakeCursor:
+            def __init__(self, dbname):
+                self.dbname = dbname
+
+            def execute(self, query):
+                if query == "SHOW TABLES":
+                    key = f"Tables_in_{self.dbname}"
+                    self._fetchall = [{key: "example"}]
+                elif query.startswith("SHOW COLUMNS"):
+                    self._fetchall = [{"Field": "col"}]
+
+            def fetchall(self):
+                return getattr(self, "_fetchall", [])
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, exc_type, exc, tb):
+                pass
+
+        class FakeConn:
+            def __init__(self, dbname):
+                self.closed = False
+                self.cursor_obj = FakeCursor(dbname)
+
+            def cursor(self):
+                return self.cursor_obj
+
+            def close(self):
+                self.closed = True
+
+        db = SlurmDB(database="mydb")
+
+        def fake_connect():
+            db._conn = FakeConn(db.database)
+
+        db.connect = fake_connect
+
+        with db as ctx:
+            extract_schema(ctx)
+            conn = ctx._conn
 
         self.assertTrue(conn.closed)
         self.assertIsNone(db._conn)
