@@ -147,6 +147,11 @@ class SlurmDB:
                 if row and 'name' in row:
                     self.cluster = row['name']
 
+    def cursor(self):
+        """Return a database cursor, connecting if needed."""
+        self.connect()
+        return self._conn.cursor()
+
     def close(self):
         """Close the database connection if open."""
         if self._conn is not None:
