@@ -15,8 +15,8 @@ jobs:
         uses: actions/setup-python@v5
         with:
           python-version: '3.x'
-      - name: Install Python dependencies
-        run: pip install -r requirements.txt
+      - name: Install Python lint deps
+        run: pip install flake8
       - name: Python lint
         run: flake8 src test
       - name: Set up Node
@@ -38,10 +38,10 @@ jobs:
         uses: actions/setup-python@v5
         with:
           python-version: '3.x'
-      - name: Install Python dependencies
-        run: pip install -r requirements.txt
       - name: Python unit tests
-        run: PYTHONPATH=src python test/unit/slurmdb_validation.test.py
+        run: |
+          pip install pytest >/dev/null 2>&1
+          PYTHONPATH=src python test/unit/slurmdb_validation.test.py
       - name: Set up Node
         uses: actions/setup-node@v4
         with:
@@ -57,8 +57,6 @@ jobs:
         uses: actions/setup-python@v5
         with:
           python-version: '3.x'
-      - name: Install Python dependencies
-        run: pip install -r requirements.txt
       - name: Set up Node
         uses: actions/setup-node@v4
         with:
@@ -74,7 +72,7 @@ jobs:
         uses: actions/setup-python@v5
         with:
           python-version: '3.x'
-      - name: Install Python dependencies
-        run: pip install -r requirements.txt
+      - name: Install Bandit
+        run: pip install bandit
       - name: Run Bandit
         run: bandit -r src

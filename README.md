@@ -35,12 +35,6 @@ SlurmCostManager/
 
 ## 🧰 Installation & Development
 
-First install the Python dependencies used for database access, tests, and linting:
-
-```bash
-pip install -r requirements.txt
-```
-
 Recommend using the **Cockpit Starter Kit** workflow to scaffold and build your plugin:
 
 - Use `make devel-install` to symlink your dist output into `~/.local/share/cockpit/` for live development.
