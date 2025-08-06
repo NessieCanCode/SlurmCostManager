@@ -14,6 +14,7 @@ This repository now includes a responsive Cockpit UI built with React.  The inte
 - **Full-screen sidebar navigation** with an integrated settings dropdown to manage rates, business information, and invoice branding.
 
 
+
 ## 📁 Project Structure
 
 ```text

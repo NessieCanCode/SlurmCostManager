@@ -683,6 +683,13 @@ function App() {
   );
 }
 
-ReactDOM.createRoot(document.getElementById('root')).render(
-  React.createElement(React.StrictMode, null, React.createElement(App))
-);
+const configRoot = document.getElementById('config-root');
+if (configRoot) {
+  ReactDOM.createRoot(configRoot).render(
+    React.createElement(React.StrictMode, null, React.createElement(ConfigEditor))
+  );
+} else {
+  ReactDOM.createRoot(document.getElementById('root')).render(
+    React.createElement(React.StrictMode, null, React.createElement(App))
+  );
+}

@@ -151,6 +151,18 @@ body {
   box-sizing: border-box;
 }
 
+@media (max-width: 600px) {
+  nav button {
+    display: block;
+    margin: 0.5em 0;
+  }
+
+.config-section input,
+.config-section textarea {
+  width: 100%;
+  box-sizing: border-box;
+}
+
 
 .dropdown {
   margin-top: auto;
