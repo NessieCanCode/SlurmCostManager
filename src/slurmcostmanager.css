@@ -110,6 +110,22 @@ nav button:hover {
   height: 300px;
 }
 
+.my-1 {
+  margin: 1em 0;
+}
+
+.mt-05 {
+  margin-top: 0.5em;
+}
+
+.mt-1 {
+  margin-top: 1em;
+}
+
+.ml-05 {
+  margin-left: 0.5em;
+}
+
 .rates-table {
   border-collapse: collapse;
   margin-top: 0.5em;

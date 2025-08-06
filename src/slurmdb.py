@@ -342,6 +342,9 @@ class SlurmDB:
             raise
         if not rates_missing:
             schema_path = os.path.join(os.path.dirname(__file__), 'rates-schema.json')
+            if jsonschema is None:
+                logging.error("jsonschema is required but not installed")
+                raise RuntimeError("jsonschema is required but not installed")
             try:
                 with open(schema_path) as sfh:
                     schema = json.load(sfh)
