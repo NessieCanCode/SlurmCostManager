@@ -1,6 +1,5 @@
 const path = require('path');
 const webpack = require('webpack');
-const CssMinimizerPlugin = require('css-minimizer-webpack-plugin');
 
 module.exports = {
   entry: './src/slurmcostmanager.js',
@@ -30,8 +29,6 @@ module.exports = {
   optimization: {
     splitChunks: false,
     runtimeChunk: false,
-    minimize: true,
-    minimizer: ['...', new CssMinimizerPlugin()],
   },
   plugins: [
     new webpack.optimize.LimitChunkCountPlugin({ maxChunks: 1 }),

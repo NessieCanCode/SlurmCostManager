@@ -22,16 +22,11 @@ Use the provided templates when opening a bug report or feature request.
 
 ## Development Workflow
 
-The project uses [Webpack](https://webpack.js.org/) to bundle and minify JavaScript and CSS assets.
-Ensure you have a recent version of Node.js and `npm` installed.
-
 1. Fork the repository and create a topic branch off `main`.
 2. Make your changes, including tests and documentation when appropriate.
-3. Run `npm install` if you haven't already to install the required build tools.
-4. Run `make build` to generate the optimized assets in `dist/`.
-5. Run `make check` and ensure all tests pass.
-6. Commit with clear messages that describe your changes.
-7. Submit a pull request using the template provided.
+3. Run `make check` and ensure all tests pass.
+4. Commit with clear messages that describe your changes.
+5. Submit a pull request using the template provided.
 
 ## Review & Approval
 
