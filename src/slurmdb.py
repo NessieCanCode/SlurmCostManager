@@ -29,7 +29,6 @@ class SlurmDB:
         config_file=None,
         cluster=None,
         slurm_conf=None,
-        connect_timeout=10,
     ):
         conf_path = config_file or os.environ.get("SLURMDB_CONF", "/etc/slurm/slurmdbd.conf")
         cfg = self._load_config(conf_path)
@@ -39,7 +38,6 @@ class SlurmDB:
         self.user = user or os.environ.get("SLURMDB_USER") or cfg.get("user", "slurm")
         self.password = password or os.environ.get("SLURMDB_PASS") or cfg.get("password", "")
         self.database = database or os.environ.get("SLURMDB_DB") or cfg.get("db", "slurm_acct_db")
-        self.connect_timeout = int(connect_timeout)
         self._conn = None
         self._config_file = conf_path
         self._slurm_conf = slurm_conf or os.environ.get("SLURM_CONF", "/etc/slurm/slurm.conf")
@@ -145,7 +143,6 @@ class SlurmDB:
                 password=self.password,
                 database=self.database,
                 cursorclass=pymysql.cursors.DictCursor,
-                connect_timeout=self.connect_timeout,
             )
         if not self.cluster:
             with self._conn.cursor() as cur:
