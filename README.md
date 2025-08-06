@@ -100,6 +100,21 @@ python3 src/slurmdb.py --start 2024-06-01 --end 2024-06-30 --output billing.json
 The resulting `billing.json` file mirrors the structure expected by the
 frontend and can be used for local development or offline snapshots.
 
+#### Automatic daily exports
+
+To export usage one day at a time, the helper can remember the last processed
+date in `~/.slurm-cost-manager/last_run.json`. Running with `--auto-daily`
+without `--start`/`--end` processes the next unexported day and writes a JSON
+file per day into the chosen directory:
+
+```bash
+python3 src/slurmdb.py --auto-daily --output daily-reports/
+```
+
+If multiple days were missed, each unprocessed day is exported until caught up.
+After a successful export the state file is updated so subsequent runs pick up
+where they left off.
+
 ### Inspecting the database schema
 
 If you need to see which tables and columns are present in your Slurm

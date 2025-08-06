@@ -4,12 +4,35 @@ import re
 import json
 import logging
 import sys
-from datetime import datetime
+from datetime import date, datetime, timedelta
 
 try:
     import pymysql
 except ImportError:  # fallback if pymysql is missing
     pymysql = None
+
+
+STATE_FILE = os.path.expanduser("~/.slurm-cost-manager/last_run.json")
+
+
+def _read_last_run():
+    """Return the last processed end date from the state file."""
+    try:
+        with open(STATE_FILE) as fh:
+            data = json.load(fh)
+            return data.get("last_end")
+    except (OSError, json.JSONDecodeError):
+        return None
+
+
+def _write_last_run(end_date):
+    """Persist the last processed end date."""
+    try:
+        os.makedirs(os.path.dirname(STATE_FILE), exist_ok=True)
+        with open(STATE_FILE, "w") as fh:
+            json.dump({"last_end": end_date}, fh)
+    except OSError as e:
+        logging.warning("Failed to write state file %s: %s", STATE_FILE, e)
 
 
 class SlurmDB:
@@ -425,9 +448,10 @@ if __name__ == "__main__":
     import argparse
 
     parser = argparse.ArgumentParser(description="Export Slurm usage data as JSON")
-    parser.add_argument("--start", required=True, help="start date YYYY-MM-DD")
-    parser.add_argument("--end", required=True, help="end date YYYY-MM-DD")
-    parser.add_argument("--output", default="usage.json", help="output file path")
+    parser.add_argument("--start", help="start date YYYY-MM-DD")
+    parser.add_argument("--end", help="end date YYYY-MM-DD")
+    parser.add_argument("--auto-daily", action="store_true", help="export unprocessed days")
+    parser.add_argument("--output", default="usage.json", help="output file path or directory")
     parser.add_argument("--conf", help="path to slurmdbd.conf")
     parser.add_argument("--cluster", help="cluster name (table prefix)")
     parser.add_argument(
@@ -443,11 +467,42 @@ if __name__ == "__main__":
         cluster=args.cluster,
         slurm_conf=args.slurm_conf,
     )
-    data = db.export_summary(args.start, args.end)
 
-    if args.output == '-' or args.output == '/dev/stdout':
-        json.dump(data, sys.stdout, indent=2, default=str)
+    def _export_day(day):
+        day_str = day.isoformat()
+        data = db.export_summary(day_str, day_str)
+        if args.output in ("-", "/dev/stdout"):
+            json.dump(data, sys.stdout, indent=2, default=str)
+            sys.stdout.write("\n")
+        else:
+            out_path = args.output
+            if args.auto_daily and not args.start and not args.end:
+                os.makedirs(out_path, exist_ok=True)
+                out_path = os.path.join(out_path, f"{day_str}.json")
+            with open(out_path, "w") as fh:
+                json.dump(data, fh, indent=2, default=str)
+            print(f"Wrote {out_path}")
+        _write_last_run(day_str)
+
+    if args.auto_daily and not args.start and not args.end:
+        last = _read_last_run()
+        if last:
+            start = datetime.fromisoformat(last).date() + timedelta(days=1)
+        else:
+            start = date.today() - timedelta(days=1)
+        end = date.today() if start < date.today() else start
+        current = start
+        while current <= end:
+            _export_day(current)
+            current += timedelta(days=1)
     else:
-        with open(args.output, "w") as fh:
-            json.dump(data, fh, indent=2, default=str)
-        print(f"Wrote {args.output}")
+        if not args.start or not args.end:
+            parser.error("--start and --end required unless --auto-daily is used without them")
+        data = db.export_summary(args.start, args.end)
+        if args.output == '-' or args.output == '/dev/stdout':
+            json.dump(data, sys.stdout, indent=2, default=str)
+        else:
+            with open(args.output, "w") as fh:
+                json.dump(data, fh, indent=2, default=str)
+            print(f"Wrote {args.output}")
+        _write_last_run(args.end)
