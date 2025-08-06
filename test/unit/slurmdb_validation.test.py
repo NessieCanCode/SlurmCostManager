@@ -15,6 +15,35 @@ class SlurmDBValidationTests(unittest.TestCase):
         db = SlurmDB(host="localhost", port=3306, user="slurm", password="", database="slurm_acct_db", cluster="cluster1")
         self.assertEqual(db.cluster, "cluster1")
 
+    def test_connect_timeout_forwarded(self):
+        class FakePyMySQL:
+            class cursors:
+                DictCursor = object
+
+            def __init__(self):
+                self.kwargs = None
+
+            def connect(self, **kwargs):
+                self.kwargs = kwargs
+
+                class FakeConn:
+                    def close(self):
+                        pass
+
+                return FakeConn()
+
+        import slurmdb as slurmdb_module
+
+        original = slurmdb_module.pymysql
+        fake = FakePyMySQL()
+        slurmdb_module.pymysql = fake
+        try:
+            db = SlurmDB(connect_timeout=123, cluster="c")
+            db.connect()
+            self.assertEqual(fake.kwargs.get("connect_timeout"), 123)
+        finally:
+            slurmdb_module.pymysql = original
+
     def test_invalid_time_format(self):
         db = SlurmDB()
         with self.assertRaises(ValueError):
