@@ -15,7 +15,7 @@ build: org.cockpit_project.slurmcostmanager.metainfo.xml
 >npm ci
 >npm run build
 >mkdir -p $(DIST)
->rsync -a --exclude 'vendor' --exclude 'slurmcostmanager.js' --exclude 'slurmcostmanager.css' src/ $(DIST)/
+>rsync -a --exclude 'vendor' --exclude '*.js' --exclude '*.css' src/ $(DIST)/
 >cp manifest.json $(DIST)/
 >cp org.cockpit_project.slurmcostmanager.metainfo.xml $(DIST)/
 
