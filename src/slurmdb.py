@@ -10,6 +10,10 @@ try:
     import pymysql
 except ImportError:  # fallback if pymysql is missing
     pymysql = None
+try:
+    import jsonschema
+except ImportError:  # pragma: no cover - handled in tests
+    jsonschema = None
 
 
 class SlurmDB:
@@ -325,15 +329,29 @@ class SlurmDB:
         total_cost = 0.0
 
         rates_path = os.path.join(os.path.dirname(__file__), 'rates.json')
+        rates_missing = False
         try:
             with open(rates_path) as fh:
                 rates_cfg = json.load(fh)
         except OSError as e:
             logging.warning("Unable to read rates file %s: %s", rates_path, e)
             rates_cfg = {}
+            rates_missing = True
         except json.JSONDecodeError as e:
             logging.error("Failed to parse rates file %s: %s", rates_path, e)
             raise
+        if not rates_missing:
+            schema_path = os.path.join(os.path.dirname(__file__), 'rates-schema.json')
+            try:
+                with open(schema_path) as sfh:
+                    schema = json.load(sfh)
+                jsonschema.validate(rates_cfg, schema)
+            except OSError as e:
+                logging.error("Failed to read rates schema %s: %s", schema_path, e)
+                raise
+            except jsonschema.ValidationError as e:
+                logging.error("Invalid rate configuration: %s", e.message)
+                raise
         default_rate = rates_cfg.get('defaultRate', 0.01)
         overrides = rates_cfg.get('overrides', {})
         historical = rates_cfg.get('historicalRates', {})

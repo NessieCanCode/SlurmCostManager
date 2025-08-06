@@ -2,3 +2,4 @@ pymysql
 flake8
 pytest
 bandit
+jsonschema
