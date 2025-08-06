@@ -601,21 +601,67 @@ function App() {
     { className: 'app' },
     React.createElement(
       'nav',
-      null,
+      { className: 'navbar navbar-expand navbar-light bg-light' },
       React.createElement(
-        'button',
-        { onClick: () => setView('summary') },
-        'Summary'
-      ),
-      React.createElement(
-        'button',
-        { onClick: () => setView('details') },
-        'Details'
-      ),
-      React.createElement(
-        'button',
-        { onClick: () => setView('rates') },
-        'Rates'
+        'div',
+        { className: 'container-fluid' },
+        React.createElement(
+          'button',
+          {
+            className: 'navbar-toggler',
+            type: 'button',
+            'data-bs-toggle': 'collapse',
+            'data-bs-target': '#navbarNav',
+            'aria-controls': 'navbarNav',
+            'aria-expanded': 'false',
+            'aria-label': 'Toggle navigation'
+          },
+          React.createElement('span', { className: 'navbar-toggler-icon' })
+        ),
+        React.createElement(
+          'div',
+          { className: 'collapse navbar-collapse', id: 'navbarNav' },
+          React.createElement(
+            'ul',
+            { className: 'navbar-nav' },
+            React.createElement(
+              'li',
+              { className: 'nav-item' },
+              React.createElement(
+                'button',
+                {
+                  className: 'nav-link btn btn-link',
+                  onClick: () => setView('summary')
+                },
+                'Summary'
+              )
+            ),
+            React.createElement(
+              'li',
+              { className: 'nav-item' },
+              React.createElement(
+                'button',
+                {
+                  className: 'nav-link btn btn-link',
+                  onClick: () => setView('details')
+                },
+                'Details'
+              )
+            ),
+            React.createElement(
+              'li',
+              { className: 'nav-item' },
+              React.createElement(
+                'button',
+                {
+                  className: 'nav-link btn btn-link',
+                  onClick: () => setView('rates')
+                },
+                'Rates'
+              )
+            )
+          )
+        )
       )
     ),
     view !== 'rates' && !data && !error && React.createElement('p', null, 'Loading...'),
