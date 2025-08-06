@@ -58,12 +58,50 @@ function testInvalidConfig() {
   }
 }
 
+function testNegativeInputs() {
+  const usage = [
+    { account: 'negHours', date: '2024-05-01', core_hours: -5 },
+    { account: 'negRate', date: '2024-05-01', core_hours: 5 },
+    { account: 'discLow', date: '2024-05-01', core_hours: 5 },
+    { account: 'discHigh', date: '2024-05-01', core_hours: 5 },
+    { account: 'def', date: '2024-05-01', core_hours: 5 },
+  ];
+  const config = {
+    defaultRate: -0.1,
+    overrides: {
+      negRate: { rate: -0.2 },
+      discLow: { rate: 0.1, discount: -0.5 },
+      discHigh: { rate: 0.1, discount: 1.5 },
+    },
+  };
+  const charges = calculateCharges(usage, config);
+  const may = charges['2024-05'];
+  assert.ok(!('negHours' in may));
+  assert.deepStrictEqual(may.negRate, { core_hours: 5, cost: 0 });
+  assert.deepStrictEqual(may.discLow, { core_hours: 5, cost: 0.5 });
+  assert.deepStrictEqual(may.discHigh, { core_hours: 5, cost: 0 });
+  assert.deepStrictEqual(may.def, { core_hours: 5, cost: 0 });
+}
+
+function testRoundingTotals() {
+  const usage = [
+    { account: 'round', date: '2024-06-01', core_hours: 0.333 },
+    { account: 'round', date: '2024-06-02', core_hours: 0.333 },
+  ];
+  const charges = calculateCharges(usage, { defaultRate: 0.333 });
+  const june = charges['2024-06'];
+  assert.strictEqual(june.round.core_hours, 0.67);
+  assert.strictEqual(june.round.cost, 0.22);
+}
+
 function run() {
   testFileConfig();
   testPassedConfig();
   testInvalidUsageIgnored();
   testMissingConfig();
   testInvalidConfig();
+  testNegativeInputs();
+  testRoundingTotals();
   console.log('All calculator tests passed.');
 }
 
