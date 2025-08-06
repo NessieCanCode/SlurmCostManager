@@ -1,46 +1,32 @@
-html, body, #root {
-  height: 100%;
-  margin: 0;
-}
-
 body {
   font-family: sans-serif;
   margin: 0;
   padding: 0;
 }
 
-.app {
-  display: flex;
-  height: 100%;
-}
-
-.sidebar {
-  width: 200px;
+nav {
   background: #333;
-  color: #fff;
+  padding: 0.5em;
   display: flex;
-  flex-direction: column;
-  padding: 0.5em 0;
+  flex-wrap: wrap;
 }
 
-.sidebar button {
-  text-align: left;
+nav button {
+  margin-right: 0.5em;
   padding: 0.5em 1em;
   color: #fff;
-  background: none;
+  background: #555;
   border: none;
+  border-radius: 3px;
   cursor: pointer;
 }
 
-.sidebar button:hover,
-.sidebar button.active {
-  background: #555;
+nav button:hover {
+  background: #777;
 }
 
-.content {
-  flex: 1;
+.app {
   padding: 1em;
-  overflow: auto;
 }
 
 .table-container {
@@ -156,30 +142,4 @@ body {
     display: block;
     margin: 0.5em 0;
   }
-
-.config-section input,
-.config-section textarea {
-  width: 100%;
-  box-sizing: border-box;
 }
-
-
-.dropdown {
-  margin-top: auto;
-  position: relative;
-}
-
-.dropdown-menu {
-  position: absolute;
-  left: 100%;
-  top: 0;
-  background: #fff;
-  color: #000;
-  padding: 1em;
-  border: 1px solid #ccc;
-  z-index: 1000;
-  width: 300px;
-  max-height: 80vh;
-  overflow: auto;
-}
-

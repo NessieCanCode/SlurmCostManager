@@ -623,63 +623,37 @@ function ConfigEditor({ onConfigUpdated }) {
 
 function App() {
   const [view, setView] = useState('summary');
-  const [settingsOpen, setSettingsOpen] = useState(false);
-  const { data, error, reload } = useBillingData();
+  const { data, error } = useBillingData();
 
   return React.createElement(
     'div',
     { className: 'app' },
     React.createElement(
-      'div',
-      { className: 'sidebar' },
+      'nav',
+      null,
       React.createElement(
         'button',
-        {
-          className: view === 'summary' ? 'active' : '',
-          onClick: () => setView('summary')
-        },
+        { onClick: () => setView('summary') },
         'Summary'
       ),
       React.createElement(
         'button',
-        {
-          className: view === 'details' ? 'active' : '',
-          onClick: () => setView('details')
-        },
+        { onClick: () => setView('details') },
         'Details'
-      ),
-      React.createElement(
-        'div',
-        { className: 'dropdown' },
-        React.createElement(
-          'button',
-          { onClick: () => setSettingsOpen(open => !open) },
-          'Settings'
-        ),
-        settingsOpen &&
-          React.createElement(
-            'div',
-            { className: 'dropdown-menu' },
-            React.createElement(ConfigEditor, { onConfigUpdated: reload })
-          )
       )
     ),
-    React.createElement(
-      'div',
-      { className: 'content' },
-      !data && !error && React.createElement('p', null, 'Loading...'),
-      error && React.createElement('p', { className: 'error' }, 'Failed to load data'),
-      data &&
-        view === 'summary' &&
-        React.createElement(Summary, {
-          summary: data.summary,
-          details: data.details,
-          daily: data.daily,
-          monthly: data.monthly,
-          yearly: data.yearly
-        }),
-      data && view === 'details' && React.createElement(Details, { details: data.details })
-    )
+    !data && !error && React.createElement('p', null, 'Loading...'),
+    error && React.createElement('p', { className: 'error' }, 'Failed to load data'),
+    data &&
+      view === 'summary' &&
+      React.createElement(Summary, {
+        summary: data.summary,
+        details: data.details,
+        daily: data.daily,
+        monthly: data.monthly,
+        yearly: data.yearly
+      }),
+    data && view === 'details' && React.createElement(Details, { details: data.details })
   );
 }
 
