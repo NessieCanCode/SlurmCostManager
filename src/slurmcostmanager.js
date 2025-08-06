@@ -3,9 +3,9 @@ const { useState, useEffect, useRef, useCallback } = React;
 const ReactDOM = require('react-dom/client');
 const Chart = require('chart.js/auto');
 const { jsPDF } = require('jspdf');
-require('bootstrap/dist/css/bootstrap.min.css');
-require('bootstrap/dist/js/bootstrap.bundle.min.js');
 if (typeof document !== 'undefined') {
+  require('bootstrap/dist/css/bootstrap.min.css');
+  require('bootstrap/dist/js/bootstrap.bundle.min.js');
   require('./slurmcostmanager.css');
 }
 
@@ -186,10 +186,10 @@ function Summary({ summary, details, daily, monthly, yearly }) {
     ),
     React.createElement(
       'div',
-      { className: 'my-1' },
+      { className: 'my-3' },
       React.createElement(
         'button',
-        { onClick: downloadInvoice },
+        { onClick: downloadInvoice, className: 'btn btn-secondary' },
         'Download Invoice'
       )
     ),
@@ -486,94 +486,106 @@ function Rates({ onRatesUpdated }) {
     React.createElement('h2', null, 'Rate Configuration'),
     React.createElement(
       'div',
-      null,
+      { className: 'form-floating mb-3' },
+      React.createElement('input', {
+        type: 'number',
+        step: '0.001',
+        className: 'form-control',
+        id: 'defaultRate',
+        placeholder: ' ',
+        value: config.defaultRate,
+        onChange: e =>
+          setConfig({ ...config, defaultRate: e.target.value })
+      }),
       React.createElement(
         'label',
-        null,
-        'Default Rate ($/core-hour): ',
-        React.createElement('input', {
-          type: 'number',
-          step: '0.001',
-          value: config.defaultRate,
-          onChange: e =>
-            setConfig({ ...config, defaultRate: e.target.value })
-        })
+        { htmlFor: 'defaultRate' },
+        'Default Rate ($/core-hour)'
       )
     ),
     React.createElement('h3', null, 'Account Overrides'),
-    React.createElement(
-      'table',
-      { className: 'rates-table' },
+    overrides.map((o, idx) =>
       React.createElement(
-        'thead',
-        null,
+        'div',
+        { className: 'row g-2 mb-2', key: idx },
         React.createElement(
-          'tr',
-          null,
-          React.createElement('th', null, 'Account'),
-          React.createElement('th', null, 'Rate'),
-          React.createElement('th', null, 'Discount'),
-          React.createElement('th', null)
-        )
-      ),
-      React.createElement(
-        'tbody',
-        null,
-        overrides.map((o, idx) =>
+          'div',
+          { className: 'col-md-4' },
           React.createElement(
-            'tr',
-            { key: idx },
-            React.createElement('td', null,
-              React.createElement('input', {
-                value: o.account,
-                onChange: e =>
-                  updateOverride(idx, 'account', e.target.value)
-              })
-            ),
-            React.createElement('td', null,
-              React.createElement('input', {
-                type: 'number',
-                step: '0.001',
-                value: o.rate,
-                onChange: e =>
-                  updateOverride(idx, 'rate', e.target.value)
-              })
-            ),
-            React.createElement('td', null,
-              React.createElement('input', {
-                type: 'number',
-                step: '0.01',
-                value: o.discount,
-                onChange: e =>
-                  updateOverride(idx, 'discount', e.target.value)
-              })
-            ),
-            React.createElement('td', null,
-              React.createElement(
-                'button',
-                { className: 'link-btn', onClick: () => removeOverride(idx) },
-                'Remove'
-              )
-            )
+            'div',
+            { className: 'form-floating' },
+            React.createElement('input', {
+              className: 'form-control',
+              id: `account-${idx}`,
+              placeholder: ' ',
+              value: o.account,
+              onChange: e => updateOverride(idx, 'account', e.target.value)
+            }),
+            React.createElement('label', { htmlFor: `account-${idx}` }, 'Account')
+          )
+        ),
+        React.createElement(
+          'div',
+          { className: 'col-md-3' },
+          React.createElement(
+            'div',
+            { className: 'form-floating' },
+            React.createElement('input', {
+              type: 'number',
+              step: '0.001',
+              className: 'form-control',
+              id: `rate-${idx}`,
+              placeholder: ' ',
+              value: o.rate,
+              onChange: e => updateOverride(idx, 'rate', e.target.value)
+            }),
+            React.createElement('label', { htmlFor: `rate-${idx}` }, 'Rate')
+          )
+        ),
+        React.createElement(
+          'div',
+          { className: 'col-md-3' },
+          React.createElement(
+            'div',
+            { className: 'form-floating' },
+            React.createElement('input', {
+              type: 'number',
+              step: '0.01',
+              className: 'form-control',
+              id: `discount-${idx}`,
+              placeholder: ' ',
+              value: o.discount,
+              onChange: e => updateOverride(idx, 'discount', e.target.value)
+            }),
+            React.createElement('label', { htmlFor: `discount-${idx}` }, 'Discount')
+          )
+        ),
+        React.createElement(
+          'div',
+          { className: 'col-md-2 d-flex align-items-center' },
+          React.createElement(
+            'button',
+            { className: 'btn btn-link', onClick: () => removeOverride(idx) },
+            'Remove'
           )
         )
       )
     ),
     React.createElement(
       'button',
-      { onClick: addOverride, className: 'mt-05' },
+      { onClick: addOverride, className: 'btn btn-secondary mt-2' },
       'Add Override'
     ),
     React.createElement(
       'div',
-      { className: 'mt-1' },
+      { className: 'mt-3' },
       React.createElement(
         'button',
-        { onClick: save, disabled: saving },
+        { onClick: save, disabled: saving, className: 'btn btn-primary' },
         'Save'
       ),
-      saving && React.createElement('span', null, ' Saving...'),
-      status && React.createElement('span', { className: 'ml-05' }, status)
+      saving && React.createElement('span', { className: 'ms-2' }, 'Saving...'),
+      status && React.createElement('span', { className: 'ms-2' }, status)
     )
   );
 }
