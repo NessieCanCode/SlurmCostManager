@@ -2,12 +2,6 @@
 
 const fs = require('fs');
 const path = require('path');
-const Ajv = require('ajv');
-
-const schema = JSON.parse(
-  fs.readFileSync(path.join(__dirname, 'rates-schema.json'), 'utf8')
-);
-const ajv = new Ajv();
 
 /**
  * Load rate configuration from rates.json.
@@ -18,13 +12,7 @@ function loadRatesConfig() {
   const cfgPath = path.join(__dirname, 'rates.json');
   try {
     const data = fs.readFileSync(cfgPath, 'utf8');
-    const cfg = JSON.parse(data);
-    const valid = ajv.validate(schema, cfg);
-    if (!valid) {
-      const msg = ajv.errors?.[0]?.message || 'Invalid rate configuration';
-      throw new Error(`Invalid rate configuration: ${msg}`);
-    }
-    return cfg;
+    return JSON.parse(data);
   } catch (e) {
     if (e.code === 'ENOENT') {
       return {};

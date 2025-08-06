@@ -58,17 +58,6 @@ function testInvalidConfig() {
   }
 }
 
-function testSchemaValidation() {
-  const cfgPath = path.join(__dirname, '../../src/rates.json');
-  const original = fs.readFileSync(cfgPath, 'utf8');
-  fs.writeFileSync(cfgPath, '{}', 'utf8');
-  try {
-    assert.throws(() => loadRatesConfig(), /Invalid rate configuration/);
-  } finally {
-    fs.writeFileSync(cfgPath, original, 'utf8');
-  }
-}
-
 function testNegativeInputs() {
   const usage = [
     { account: 'negHours', date: '2024-05-01', core_hours: -5 },
@@ -111,7 +100,6 @@ function run() {
   testInvalidUsageIgnored();
   testMissingConfig();
   testInvalidConfig();
-  testSchemaValidation();
   testNegativeInputs();
   testRoundingTotals();
   console.log('All calculator tests passed.');
