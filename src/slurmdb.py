@@ -2,6 +2,7 @@
 import os
 import re
 import json
+import logging
 import sys
 from datetime import datetime
 
@@ -288,8 +289,12 @@ class SlurmDB:
         try:
             with open(rates_path) as fh:
                 rates_cfg = json.load(fh)
-        except Exception:
+        except OSError as e:
+            logging.warning("Unable to read rates file %s: %s", rates_path, e)
             rates_cfg = {}
+        except json.JSONDecodeError as e:
+            logging.error("Failed to parse rates file %s: %s", rates_path, e)
+            raise
         default_rate = rates_cfg.get('defaultRate', 0.01)
         overrides = rates_cfg.get('overrides', {})
         historical = rates_cfg.get('historicalRates', {})
