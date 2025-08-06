@@ -33,25 +33,6 @@ nav button:hover {
   overflow-x: auto;
 }
 
-.summary-table th {
-  text-align: left;
-  padding-right: 1em;
-}
-
-.details-table,
-.summary-table {
-  border-collapse: collapse;
-  width: 100%;
-}
-
-.details-table th,
-.details-table td,
-.summary-table th,
-.summary-table td {
-  border: 1px solid #ccc;
-  padding: 0.25em 0.5em;
-}
-
 .invoice-list {
   list-style: none;
   padding: 0;
@@ -81,30 +62,6 @@ nav button:hover {
   cursor: pointer;
 }
 
-.users-table {
-  width: 100%;
-  border-collapse: collapse;
-  margin-top: 0.5em;
-}
-
-.users-table th,
-.users-table td {
-  border: 1px solid #ccc;
-  padding: 0.25em 0.5em;
-}
-
-.jobs-table {
-  width: 100%;
-  border-collapse: collapse;
-  margin-top: 0.5em;
-}
-
-.jobs-table th,
-.jobs-table td {
-  border: 1px solid #ccc;
-  padding: 0.25em 0.5em;
-}
-
 .chart-container {
   position: relative;
   height: 300px;
@@ -124,22 +81,6 @@ nav button:hover {
 
 .ml-05 {
   margin-left: 0.5em;
-}
-
-.rates-table {
-  border-collapse: collapse;
-  margin-top: 0.5em;
-}
-
-.rates-table th,
-.rates-table td {
-  border: 1px solid #ccc;
-  padding: 0.25em 0.5em;
-}
-
-.rates-table input {
-  width: 100%;
-  box-sizing: border-box;
 }
 
 @media (max-width: 600px) {

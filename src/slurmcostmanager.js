@@ -159,7 +159,7 @@ function Summary({ summary, details, daily, monthly, yearly }) {
       { className: 'table-container' },
       React.createElement(
         'table',
-        { className: 'summary-table' },
+        { className: 'table table-striped table-bordered' },
         React.createElement(
           'tbody',
           null,
@@ -207,7 +207,7 @@ function Summary({ summary, details, daily, monthly, yearly }) {
 function JobDetails({ jobs }) {
   return React.createElement(
     'table',
-    { className: 'jobs-table' },
+    { className: 'table table-striped table-bordered' },
     React.createElement(
       'thead',
       null,
@@ -242,7 +242,7 @@ function UserDetails({ users }) {
   }
   return React.createElement(
     'table',
-    { className: 'users-table' },
+    { className: 'table table-striped table-bordered' },
     React.createElement(
       'thead',
       null,
@@ -304,7 +304,7 @@ function Details({ details }) {
       { className: 'table-container' },
       React.createElement(
         'table',
-        { className: 'details-table' },
+        { className: 'table table-striped table-bordered' },
         React.createElement(
           'thead',
           null,
@@ -495,6 +495,7 @@ function Rates({ onRatesUpdated }) {
           type: 'number',
           step: '0.001',
           value: config.defaultRate,
+          className: 'form-control',
           onChange: e =>
             setConfig({ ...config, defaultRate: e.target.value })
         })
@@ -503,7 +504,7 @@ function Rates({ onRatesUpdated }) {
     React.createElement('h3', null, 'Account Overrides'),
     React.createElement(
       'table',
-      { className: 'rates-table' },
+      { className: 'table table-striped table-bordered' },
       React.createElement(
         'thead',
         null,
@@ -526,6 +527,7 @@ function Rates({ onRatesUpdated }) {
             React.createElement('td', null,
               React.createElement('input', {
                 value: o.account,
+                className: 'form-control',
                 onChange: e =>
                   updateOverride(idx, 'account', e.target.value)
               })
@@ -535,6 +537,7 @@ function Rates({ onRatesUpdated }) {
                 type: 'number',
                 step: '0.001',
                 value: o.rate,
+                className: 'form-control',
                 onChange: e =>
                   updateOverride(idx, 'rate', e.target.value)
               })
@@ -544,6 +547,7 @@ function Rates({ onRatesUpdated }) {
                 type: 'number',
                 step: '0.01',
                 value: o.discount,
+                className: 'form-control',
                 onChange: e =>
                   updateOverride(idx, 'discount', e.target.value)
               })
