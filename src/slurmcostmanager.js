@@ -3,9 +3,10 @@ const { useState, useEffect, useRef, useCallback } = React;
 const ReactDOM = require('react-dom/client');
 const Chart = require('chart.js/auto');
 const { jsPDF } = require('jspdf');
-require('bootstrap/dist/css/bootstrap.min.css');
-require('bootstrap/dist/js/bootstrap.bundle.min.js');
+
 if (typeof document !== 'undefined') {
+  require('bootstrap/dist/css/bootstrap.min.css');
+  require('bootstrap/dist/js/bootstrap.bundle.min.js');
   require('./slurmcostmanager.css');
 }
 
@@ -186,7 +187,7 @@ function Summary({ summary, details, daily, monthly, yearly }) {
     ),
     React.createElement(
       'div',
-      { className: 'my-1' },
+      { className: 'my-3' },
       React.createElement(
         'button',
         { onClick: downloadInvoice },
@@ -561,19 +562,19 @@ function Rates({ onRatesUpdated }) {
     ),
     React.createElement(
       'button',
-      { onClick: addOverride, className: 'mt-05' },
+      { onClick: addOverride, className: 'mt-2' },
       'Add Override'
     ),
     React.createElement(
       'div',
-      { className: 'mt-1' },
+      { className: 'mt-3' },
       React.createElement(
         'button',
         { onClick: save, disabled: saving },
         'Save'
       ),
       saving && React.createElement('span', null, ' Saving...'),
-      status && React.createElement('span', { className: 'ml-05' }, status)
+      status && React.createElement('span', { className: 'ms-2' }, status)
     )
   );
 }
