@@ -3,14 +3,14 @@ const fs = require('fs');
 const path = require('path');
 const { calculateCharges, loadRatesConfig } = require('../../src/cost-calculator');
 
-function testFileConfig() {
+async function testFileConfig() {
   const usage = [
     { account: 'education', date: '2024-01-15', core_hours: 100 },
     { account: 'research', date: '2024-02-01', core_hours: 50 },
     { account: 'special', date: '2024-02-01', core_hours: 100 },
     { account: 'other', date: '2024-02-01', core_hours: 10 }
   ];
-  const config = loadRatesConfig();
+  const config = await loadRatesConfig();
   const charges = calculateCharges(usage, config);
   assert.strictEqual(charges['2024-01'].education.cost, 100 * 0.015 * 0.5);
   assert.strictEqual(charges['2024-02'].research.cost, 50 * 0.01);
@@ -35,35 +35,35 @@ function testInvalidUsageIgnored() {
   assert.deepStrictEqual(charges, {});
 }
 
-function testMissingConfig() {
+async function testMissingConfig() {
   const cfgPath = path.join(__dirname, '../../src/rates.json');
   const backup = cfgPath + '.bak';
   fs.renameSync(cfgPath, backup);
   try {
-    const cfg = loadRatesConfig();
+    const cfg = await loadRatesConfig();
     assert.deepStrictEqual(cfg, {});
   } finally {
     fs.renameSync(backup, cfgPath);
   }
 }
 
-function testInvalidConfig() {
+async function testInvalidConfig() {
   const cfgPath = path.join(__dirname, '../../src/rates.json');
   const original = fs.readFileSync(cfgPath, 'utf8');
   fs.writeFileSync(cfgPath, '{ invalid json', 'utf8');
   try {
-    assert.throws(() => loadRatesConfig(), SyntaxError);
+    await assert.rejects(loadRatesConfig, SyntaxError);
   } finally {
     fs.writeFileSync(cfgPath, original, 'utf8');
   }
 }
 
-function testSchemaValidation() {
+async function testSchemaValidation() {
   const cfgPath = path.join(__dirname, '../../src/rates.json');
   const original = fs.readFileSync(cfgPath, 'utf8');
   fs.writeFileSync(cfgPath, '{}', 'utf8');
   try {
-    assert.throws(() => loadRatesConfig(), /Invalid rate configuration/);
+    await assert.rejects(loadRatesConfig, /Invalid rate configuration/);
   } finally {
     fs.writeFileSync(cfgPath, original, 'utf8');
   }
@@ -105,20 +105,23 @@ function testRoundingTotals() {
   assert.strictEqual(june.round.cost, 0.22);
 }
 
-function run() {
-  testFileConfig();
+async function run() {
+  await testFileConfig();
   testPassedConfig();
   testInvalidUsageIgnored();
-  testMissingConfig();
-  testInvalidConfig();
-  testSchemaValidation();
+  await testMissingConfig();
+  await testInvalidConfig();
+  await testSchemaValidation();
   testNegativeInputs();
   testRoundingTotals();
   console.log('All calculator tests passed.');
 }
 
 if (require.main === module) {
-  run();
+  run().catch((err) => {
+    console.error(err);
+    process.exit(1);
+  });
 }
 
 module.exports = run;

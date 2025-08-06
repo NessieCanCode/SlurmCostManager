@@ -4,9 +4,9 @@ const fs = require('fs');
 const path = require('path');
 const Ajv = require('ajv');
 
-const schema = JSON.parse(
-  fs.readFileSync(path.join(__dirname, 'rates-schema.json'), 'utf8')
-);
+const schemaPromise = fs.promises
+  .readFile(path.join(__dirname, 'rates-schema.json'), 'utf8')
+  .then(JSON.parse);
 const ajv = new Ajv();
 
 /**
@@ -14,10 +14,13 @@ const ajv = new Ajv();
  *
  * @returns {Object} rate configuration
  */
-function loadRatesConfig() {
+async function loadRatesConfig() {
   const cfgPath = path.join(__dirname, 'rates.json');
   try {
-    const data = fs.readFileSync(cfgPath, 'utf8');
+    const [data, schema] = await Promise.all([
+      fs.promises.readFile(cfgPath, 'utf8'),
+      schemaPromise,
+    ]);
     const cfg = JSON.parse(data);
     const valid = ajv.validate(schema, cfg);
     if (!valid) {
