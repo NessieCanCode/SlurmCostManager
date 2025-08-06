@@ -184,7 +184,7 @@ function Summary({ summary, details, daily, monthly, yearly }) {
     ),
     React.createElement(
       'div',
-      { className: 'my-1' },
+      { style: { margin: '1em 0' } },
       React.createElement(
         'button',
         { onClick: downloadInvoice },
@@ -559,19 +559,19 @@ function Rates({ onRatesUpdated }) {
     ),
     React.createElement(
       'button',
-      { onClick: addOverride, className: 'mt-05' },
+      { onClick: addOverride, style: { marginTop: '0.5em' } },
       'Add Override'
     ),
     React.createElement(
       'div',
-      { className: 'mt-1' },
+      { style: { marginTop: '1em' } },
       React.createElement(
         'button',
         { onClick: save, disabled: saving },
         'Save'
       ),
       saving && React.createElement('span', null, ' Saving...'),
-      status && React.createElement('span', { className: 'ml-05' }, status)
+      status && React.createElement('span', { style: { marginLeft: '0.5em' } }, status)
     )
   );
 }
