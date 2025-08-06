@@ -26,6 +26,13 @@ class SlurmDBValidationTests(unittest.TestCase):
         # 1970-01-02 is 86400 seconds from the epoch
         self.assertEqual(ts, 86400)
 
+    def test_parse_mem_converts_units(self):
+        db = SlurmDB()
+        self.assertEqual(db._parse_mem("1G"), 1.0)
+        self.assertEqual(db._parse_mem("1024M"), 1.0)
+        self.assertEqual(db._parse_mem("1T"), 1024.0)
+        self.assertAlmostEqual(db._parse_mem("1048576K"), 1.0)
+
     def test_aggregate_usage_handles_int_timestamps(self):
         db = SlurmDB()
         db.fetch_usage_records = lambda start, end: [

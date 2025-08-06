@@ -149,14 +149,19 @@ class SlurmDB:
     def _parse_mem(self, mem_str):
         if not mem_str:
             return 0.0
-        m = re.match(r"(\d+(?:\.\d+)?)([MG])", str(mem_str))
+        m = re.match(r"(\d+(?:\.\d+)?)([KMGTP])", str(mem_str))
         if not m:
             return 0.0
         val = float(m.group(1))
         unit = m.group(2).upper()
-        if unit == "M":
-            val /= 1024.0
-        return val  # GB
+        factors = {
+            "K": 1 / (1024.0 ** 2),  # KB to GB
+            "M": 1 / 1024.0,         # MB to GB
+            "G": 1.0,                # GB to GB
+            "T": 1024.0,             # TB to GB
+            "P": 1024.0 ** 2,        # PB to GB (future-proofing)
+        }
+        return val * factors.get(unit, 0.0)
 
     def _parse_tres(self, tres_str, key):
         if not tres_str:
