@@ -1,11 +1,4 @@
-const React = require('react');
 const { useState, useEffect, useRef, useCallback } = React;
-const ReactDOM = require('react-dom/client');
-const Chart = require('chart.js/auto');
-const { jsPDF } = require('jspdf');
-if (typeof document !== 'undefined') {
-  require('./slurmcostmanager.css');
-}
 
 // Determine the directory where the plugin's files are installed. When running
 // inside Cockpit, `window.cockpit.manifest.path` points to the plugin root
@@ -127,7 +120,9 @@ function CoreHoursChart({ data, labelKey }) {
 
 function Summary({ summary, details, daily, monthly, yearly }) {
   function downloadInvoice() {
-    const doc = new jsPDF();
+    const pdflib = window.jspdf;
+    if (!pdflib || !pdflib.jsPDF) return;
+    const doc = new pdflib.jsPDF();
     doc.text(`Invoice for ${summary.period}`, 10, 10);
     let y = 20;
     doc.text('Account', 10, y);
