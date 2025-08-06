@@ -7,6 +7,7 @@ const { jsPDF } = require('jspdf');
 if (typeof document !== 'undefined') {
   require('bootstrap/dist/css/bootstrap.min.css');
   require('bootstrap/dist/js/bootstrap.bundle.min.js');
+  // Copy custom styles to the final build without injecting a <style> tag
   require('./slurmcostmanager.css');
 }
 
