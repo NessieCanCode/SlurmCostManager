@@ -303,6 +303,15 @@ class SlurmDB:
         ]
 
     def export_summary(self, start_time, end_time):
+        """Export a summary of usage and costs.
+
+        Rates represent a fixed cost per core-hour (for example, dollars
+        per core-hour) and must be non-negative. ``discount`` values are
+        fractional percentages, where ``0.2`` means a 20% discount, and
+        they must fall between 0 and 1, inclusive. A :class:`ValueError`
+        is raised if these constraints are violated.
+        """
+
         usage, totals = self.aggregate_usage(start_time, end_time)
         summary = {
             'summary': {},
@@ -335,6 +344,14 @@ class SlurmDB:
                 ovr = overrides.get(account, {})
                 rate = ovr.get('rate', base_rate)
                 discount = ovr.get('discount', 0)
+
+                if rate < 0:
+                    raise ValueError(f"Invalid rate {rate} for account {account}")
+                if not 0 <= discount <= 1:
+                    raise ValueError(
+                        f"Invalid discount {discount} for account {account}"
+                    )
+
                 acct_cost = vals['core_hours'] * rate
                 if 0 < discount < 1:
                     acct_cost *= 1 - discount
