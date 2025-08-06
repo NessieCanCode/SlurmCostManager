@@ -11,9 +11,18 @@ const path = require('path');
 function loadRatesConfig() {
   const cfgPath = path.join(__dirname, 'rates.json');
   try {
-    return JSON.parse(fs.readFileSync(cfgPath, 'utf8'));
+    const data = fs.readFileSync(cfgPath, 'utf8');
+    return JSON.parse(data);
   } catch (e) {
-    return {};
+    if (e.code === 'ENOENT') {
+      return {};
+    }
+    if (e instanceof SyntaxError) {
+      console.error(`Invalid JSON in rate configuration: ${e.message}`);
+    } else {
+      console.error(`Error loading rate configuration: ${e.message}`);
+    }
+    throw e;
   }
 }
 
