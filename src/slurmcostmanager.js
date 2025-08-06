@@ -539,95 +539,31 @@ function Rates({ onRatesUpdated }) {
 function App() {
   const [view, setView] = useState('summary');
   const { data, error, reload } = useBillingData();
-  const [menuMode, setMenuMode] = useState('custom');
-
-  useEffect(() => {
-    const parent = window.parent && window.parent.document;
-    if (!parent) return;
-
-    const hostApps = parent.getElementById('host-apps');
-    const hostsSel = parent.getElementById('hosts-sel');
-    const navHosts = parent.getElementById('nav-hosts');
-    const sidebarToggle = parent.getElementById('sidebar-toggle');
-
-    function showStandard() {
-      parent.getElementById('slurm-menu')?.remove();
-      if (hostApps) hostApps.style.display = '';
-      [hostsSel, navHosts, sidebarToggle].forEach(el => {
-        if (el) el.style.display = '';
-      });
-    }
-
-    function showCustom() {
-      if (hostApps) hostApps.style.display = 'none';
-      [hostsSel, navHosts, sidebarToggle].forEach(el => {
-        if (el) el.style.display = 'none';
-      });
-
-      let custom = parent.getElementById('slurm-menu');
-      if (!custom) {
-        custom = parent.createElement('nav');
-        custom.id = 'slurm-menu';
-        custom.className = 'pf-v6-c-nav pf-m-dark';
-        custom.innerHTML = `<ul class="pf-v6-c-nav__list">
-          <li class="pf-v6-c-nav__item"><a href="#" class="pf-v6-c-nav__link" data-view="summary">Summary</a></li>
-          <li class="pf-v6-c-nav__item"><a href="#" class="pf-v6-c-nav__link" data-view="details">Details</a></li>
-          <li class="pf-v6-c-nav__item"><a href="#" class="pf-v6-c-nav__link" data-view="rates">Rates</a></li>
-          <li class="pf-v6-c-nav__item"><a href="#" class="pf-v6-c-nav__link" id="slurm-show-cockpit">Cockpit Menu</a></li>
-        </ul>`;
-        parent.getElementById('nav-system')?.appendChild(custom);
-        custom.querySelectorAll('a[data-view]').forEach(link => {
-          link.addEventListener('click', ev => {
-            ev.preventDefault();
-            setView(link.getAttribute('data-view'));
-          });
-        });
-        custom
-          .querySelector('#slurm-show-cockpit')
-          .addEventListener('click', ev => {
-            ev.preventDefault();
-            setMenuMode('cockpit');
-          });
-      }
-    }
-
-    if (menuMode === 'custom') showCustom();
-    else showStandard();
-
-    return () => showStandard();
-  }, [menuMode, setView]);
 
   return React.createElement(
     'div',
     { className: 'app' },
-    menuMode === 'cockpit' &&
+    React.createElement(
+      'nav',
+      null,
       React.createElement(
-        'nav',
-        null,
-        React.createElement(
-          'button',
-          { onClick: () => setView('summary') },
-          'Summary'
-        ),
-        React.createElement(
-          'button',
-          { onClick: () => setView('details') },
-          'Details'
-        ),
-        React.createElement(
-          'button',
-          { onClick: () => setView('rates') },
-          'Rates'
-        ),
-        React.createElement(
-          'button',
-          { onClick: () => setMenuMode('custom') },
-          'Slurm Menu'
-        )
+        'button',
+        { onClick: () => setView('summary') },
+        'Summary'
       ),
+      React.createElement(
+        'button',
+        { onClick: () => setView('details') },
+        'Details'
+      ),
+      React.createElement(
+        'button',
+        { onClick: () => setView('rates') },
+        'Rates'
+      )
+    ),
     view !== 'rates' && !data && !error && React.createElement('p', null, 'Loading...'),
-    view !== 'rates' && error &&
-      React.createElement('p', { className: 'error' }, 'Failed to load data'),
+    view !== 'rates' && error && React.createElement('p', { className: 'error' }, 'Failed to load data'),
     data &&
       view === 'summary' &&
       React.createElement(Summary, {
@@ -635,11 +571,9 @@ function App() {
         details: data.details,
         daily: data.daily,
         monthly: data.monthly,
-        yearly: data.yearly,
+        yearly: data.yearly
       }),
-    data &&
-      view === 'details' &&
-      React.createElement(Details, { details: data.details }),
+    data && view === 'details' && React.createElement(Details, { details: data.details }),
     view === 'rates' && React.createElement(Rates, { onRatesUpdated: reload })
   );
 }
