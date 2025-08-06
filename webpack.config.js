@@ -11,16 +11,6 @@ module.exports = {
   module: {
     rules: [
       {
-        test: /bootstrap\.bundle\.min\.js$/,
-        type: 'asset/resource',
-        generator: { filename: 'bootstrap.bundle.min.js' },
-      },
-      {
-        test: /bootstrap\.min\.css$/,
-        type: 'asset/resource',
-        generator: { filename: 'bootstrap.min.css' },
-      },
-      {
         test: /\.js$/,
         exclude: /node_modules/,
         use: {
@@ -41,7 +31,7 @@ module.exports = {
     splitChunks: false,
     runtimeChunk: false,
     minimize: true,
-    minimizer: ['...', new CssMinimizerPlugin({ exclude: /bootstrap\.min\.css/ })],
+    minimizer: ['...', new CssMinimizerPlugin()],
   },
   plugins: [
     new webpack.optimize.LimitChunkCountPlugin({ maxChunks: 1 }),
