@@ -12,7 +12,7 @@ except ImportError:  # fallback if pymysql is missing
     pymysql = None
 
 
-STATE_FILE = os.path.expanduser("~/.slurm-cost-manager/last_run.json")
+STATE_FILE = os.path.expanduser("last_run.json")
 
 
 def _read_last_run():
