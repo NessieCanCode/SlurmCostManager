@@ -1,4 +1,6 @@
 const assert = require('assert');
+const fs = require('fs');
+const path = require('path');
 const { calculateCharges, loadRatesConfig } = require('../../src/cost-calculator');
 
 function testFileConfig() {
@@ -33,10 +35,35 @@ function testInvalidUsageIgnored() {
   assert.deepStrictEqual(charges, {});
 }
 
+function testMissingConfig() {
+  const cfgPath = path.join(__dirname, '../../src/rates.json');
+  const backup = cfgPath + '.bak';
+  fs.renameSync(cfgPath, backup);
+  try {
+    const cfg = loadRatesConfig();
+    assert.deepStrictEqual(cfg, {});
+  } finally {
+    fs.renameSync(backup, cfgPath);
+  }
+}
+
+function testInvalidConfig() {
+  const cfgPath = path.join(__dirname, '../../src/rates.json');
+  const original = fs.readFileSync(cfgPath, 'utf8');
+  fs.writeFileSync(cfgPath, '{ invalid json', 'utf8');
+  try {
+    assert.throws(() => loadRatesConfig(), SyntaxError);
+  } finally {
+    fs.writeFileSync(cfgPath, original, 'utf8');
+  }
+}
+
 function run() {
   testFileConfig();
   testPassedConfig();
   testInvalidUsageIgnored();
+  testMissingConfig();
+  testInvalidConfig();
   console.log('All calculator tests passed.');
 }
 
