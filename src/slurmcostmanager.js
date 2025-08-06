@@ -3,7 +3,6 @@ const { useState, useEffect, useRef, useCallback } = React;
 const ReactDOM = require('react-dom/client');
 const Chart = require('chart.js/auto');
 const { jsPDF } = require('jspdf');
-
 if (typeof document !== 'undefined') {
   require('bootstrap/dist/css/bootstrap.min.css');
   require('bootstrap/dist/js/bootstrap.bundle.min.js');
@@ -574,7 +573,7 @@ function Rates({ onRatesUpdated }) {
     ),
     React.createElement(
       'button',
-      { onClick: addOverride, className: 'mt-2' },
+      { onClick: addOverride, className: 'btn btn-secondary mt-2' },
       'Add Override'
     ),
     React.createElement(
@@ -585,7 +584,7 @@ function Rates({ onRatesUpdated }) {
         { onClick: save, disabled: saving, className: 'btn btn-primary' },
         'Save'
       ),
-      saving && React.createElement('span', null, ' Saving...'),
+      saving && React.createElement('span', { className: 'ms-2' }, 'Saving...'),
       status && React.createElement('span', { className: 'ms-2' }, status)
     )
   );
