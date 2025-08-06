@@ -21,11 +21,6 @@ module.exports = {
         generator: { filename: 'bootstrap.min.css' },
       },
       {
-        test: /slurmcostmanager\.css$/,
-        type: 'asset/resource',
-        generator: { filename: 'slurmcostmanager.css' },
-      },
-      {
         test: /\.js$/,
         exclude: /node_modules/,
         use: {
@@ -46,7 +41,7 @@ module.exports = {
     splitChunks: false,
     runtimeChunk: false,
     minimize: true,
-    minimizer: ['...', new CssMinimizerPlugin({ exclude: /bootstrap\.min\.css|slurmcostmanager\.css/ })],
+    minimizer: ['...', new CssMinimizerPlugin({ exclude: /bootstrap\.min\.css/ })],
   },
   plugins: [
     new webpack.optimize.LimitChunkCountPlugin({ maxChunks: 1 }),
