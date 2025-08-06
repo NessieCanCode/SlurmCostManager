@@ -147,6 +147,26 @@ class SlurmDB:
                 if row and 'name' in row:
                     self.cluster = row['name']
 
+    def close(self):
+        """Close the database connection if open."""
+        if self._conn is not None:
+            try:
+                self._conn.close()
+            finally:
+                self._conn = None
+
+    # Context manager support -------------------------------------------------
+    def __enter__(self):
+        """Connect to the database when entering a context."""
+        self.connect()
+        return self
+
+    def __exit__(self, exc_type, exc, tb):
+        """Ensure the connection is closed when leaving a context."""
+        self.close()
+        # Do not suppress exceptions
+        return False
+
     def _parse_mem(self, mem_str):
         if not mem_str:
             return 0.0

@@ -65,6 +65,44 @@ class SlurmDBValidationTests(unittest.TestCase):
         agg, totals = db.aggregate_usage(0, 3600)
         self.assertAlmostEqual(agg['1970-01']['acct']['core_hours'], 2.0)
 
+    def test_close_closes_connection(self):
+        class FakeConn:
+            def __init__(self):
+                self.closed = False
+
+            def close(self):
+                self.closed = True
+
+        db = SlurmDB()
+        fake = FakeConn()
+        db._conn = fake
+        db.close()
+        self.assertTrue(fake.closed)
+        self.assertIsNone(db._conn)
+
+    def test_context_manager_closes_connection(self):
+        class FakeConn:
+            def __init__(self):
+                self.closed = False
+
+            def close(self):
+                self.closed = True
+
+        db = SlurmDB()
+
+        def fake_connect():
+            db._conn = FakeConn()
+
+        db.connect = fake_connect
+
+        with db as ctx:
+            self.assertIs(ctx, db)
+            self.assertIsNotNone(db._conn)
+            conn = db._conn
+
+        self.assertTrue(conn.closed)
+        self.assertIsNone(db._conn)
+
     def test_fetch_usage_records_uses_cpus_req_if_alloc_missing(self):
         schema = extract_schema_from_dump('test/test_db_dump.sql')
         job_cols = schema.get('localcluster_job_table', [])
