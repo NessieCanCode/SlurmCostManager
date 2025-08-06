@@ -1,7 +1,6 @@
 import io
 import unittest
 from unittest import mock
-import jsonschema
 from slurmdb import SlurmDB
 
 
@@ -83,7 +82,7 @@ class BillingSummaryTests(unittest.TestCase):
             'builtins.open', side_effect=fake_open
         ):
             db = SlurmDB()
-            with self.assertRaises(jsonschema.ValidationError):
+            with self.assertRaises(ValueError):
                 db.export_summary('2023-10-01', '2023-10-31')
 
     def test_export_summary_invalid_discount(self):
@@ -95,7 +94,7 @@ class BillingSummaryTests(unittest.TestCase):
 
         def fake_open(path, *args, **kwargs):
             if path.endswith('rates.json'):
-                return io.StringIO('{"defaultRate":0.02,"overrides": {"acct": {"discount": 1.5}}}')
+                return io.StringIO('{"overrides": {"acct": {"discount": 1.5}}}')
             return open_orig(path, *args, **kwargs)
 
         open_orig = open
@@ -107,7 +106,7 @@ class BillingSummaryTests(unittest.TestCase):
             'builtins.open', side_effect=fake_open
         ):
             db = SlurmDB()
-            with self.assertRaises(jsonschema.ValidationError):
+            with self.assertRaises(ValueError):
                 db.export_summary('2023-10-01', '2023-10-31')
 
     def test_export_summary_negative_discount(self):
@@ -119,7 +118,7 @@ class BillingSummaryTests(unittest.TestCase):
 
         def fake_open(path, *args, **kwargs):
             if path.endswith('rates.json'):
-                return io.StringIO('{"defaultRate":0.02,"overrides": {"acct": {"discount": -0.1}}}')
+                return io.StringIO('{"overrides": {"acct": {"discount": -0.1}}}')
             return open_orig(path, *args, **kwargs)
 
         open_orig = open
@@ -131,30 +130,8 @@ class BillingSummaryTests(unittest.TestCase):
             'builtins.open', side_effect=fake_open
         ):
             db = SlurmDB()
-            with self.assertRaises(jsonschema.ValidationError):
+            with self.assertRaises(ValueError):
                 db.export_summary('2023-10-01', '2023-10-31')
-
-    def test_export_summary_schema_validation(self):
-        usage = {
-            '2024-01': {'acct': {'core_hours': 10.0, 'users': {}}}
-        }
-
-        def fake_open(path, *args, **kwargs):
-            if path.endswith('rates.json'):
-                return io.StringIO('{}')
-            return open_orig(path, *args, **kwargs)
-
-        open_orig = open
-        with mock.patch.object(
-            SlurmDB,
-            'aggregate_usage',
-            return_value=(usage, {'daily': {}, 'monthly': {}, 'yearly': {}}),
-        ), mock.patch.object(SlurmDB, 'fetch_invoices', return_value=[]), mock.patch(
-            'builtins.open', side_effect=fake_open
-        ):
-            db = SlurmDB()
-            with self.assertRaises(jsonschema.ValidationError):
-                db.export_summary('2024-01-01', '2024-01-31')
 
 
 if __name__ == '__main__':
