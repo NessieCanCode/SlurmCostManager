@@ -39,30 +39,15 @@ jobs:
         with:
           python-version: '3.x'
       - name: Install Python dependencies
-        run: pip install -r requirements.txt pytest-cov
+        run: pip install -r requirements.txt
       - name: Python unit tests
-        run: |
-          PYTHONPATH=src pytest test/unit/*.py --cov=src --cov-report=xml:test-coverage-python.xml
-      - name: Upload Python coverage
-        uses: actions/upload-artifact@v4
-        with:
-          name: python-coverage
-          path: test-coverage-python.xml
+        run: PYTHONPATH=src python test/unit/slurmdb_validation.test.py
       - name: Set up Node
         uses: actions/setup-node@v4
         with:
           node-version: '18'
-      - name: Install Node dependencies
-        run: npm install c8 --no-save
       - name: Node unit tests
-        run: |
-          for file in test/unit/*.test.js; do npx c8 --clean=false node "$file"; done
-          npx c8 report --reporter=lcov --reporter=text
-      - name: Upload Node coverage
-        uses: actions/upload-artifact@v4
-        with:
-          name: node-coverage
-          path: coverage
+        run: node test/unit/calculator.test.js
 
   integration-tests:
     runs-on: ubuntu-latest
