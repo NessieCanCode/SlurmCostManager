@@ -12,10 +12,6 @@
     "slurmcostmanager": {
       "path": "slurmcostmanager.html",
       "label": "Slurm Cost Manager"
-    },
-    "slurmcostmanager-config": {
-      "path": "config.html",
-      "label": "Slurm Cost Manager Settings"
     }
   }
 }
