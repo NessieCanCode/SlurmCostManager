@@ -12,10 +12,8 @@ org.cockpit_project.slurmcostmanager.metainfo.xml: org.cockpit_project.slurmcost
 >sed -e "s/@VERSION@/$(VERSION)/" -e "s/@DATE@/$(DATE)/" $< > $@
 
 build: org.cockpit_project.slurmcostmanager.metainfo.xml
->npm ci
->npm run build
 >mkdir -p $(DIST)
->rsync -a --exclude 'vendor' --exclude 'slurmcostmanager.js' --exclude 'slurmcostmanager.css' src/ $(DIST)/
+>cp -r src/* $(DIST)/
 >cp manifest.json $(DIST)/
 >cp org.cockpit_project.slurmcostmanager.metainfo.xml $(DIST)/
 
