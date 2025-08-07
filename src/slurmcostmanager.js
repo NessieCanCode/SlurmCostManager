@@ -495,12 +495,12 @@ function Summary({ summary, details, daily, monthly }) {
           })
       })
     ),
-    React.createElement('h3', null, 'Historical CPU/GPU-hrs (monthly)'),
-    React.createElement(HistoricalUsageChart, { monthly }),
+    React.createElement('h3', null, 'Top 10 PIs by consumption'),
+    React.createElement(PiConsumptionTable, { details }),
     React.createElement('h3', null, 'CPU/GPU-hrs per Slurm account'),
     React.createElement(AccountsChart, { details }),
-    React.createElement('h3', null, 'Top 10 PIs by consumption'),
-    React.createElement(PiConsumptionTable, { details })
+    React.createElement('h3', null, 'Historical CPU/GPU-hrs (monthly)'),
+    React.createElement(HistoricalUsageChart, { monthly })
   );
 }
 
