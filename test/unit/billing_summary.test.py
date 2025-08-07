@@ -186,6 +186,32 @@ class BillingSummaryTests(unittest.TestCase):
             with self.assertRaises(ValueError):
                 db.export_summary('2023-10-01', '2023-10-31')
 
+    def test_export_summary_projected_revenue(self):
+        usage = {
+            '2024-02': {
+                'acct': {'core_hours': 10.0, 'users': {}}
+            }
+        }
+
+        def fake_open(path, *args, **kwargs):
+            if path.endswith('rates.json'):
+                return io.StringIO('{"defaultRate": 0.02}')
+            return open_orig(path, *args, **kwargs)
+
+        open_orig = open
+        with mock.patch.object(
+            SlurmDB,
+            'aggregate_usage',
+            return_value=(usage, {'daily': {}, 'monthly': {}, 'yearly': {}}),
+        ), mock.patch.object(SlurmDB, 'fetch_invoices', return_value=[]), mock.patch(
+            'builtins.open', side_effect=fake_open
+        ), mock.patch.object(
+            SlurmDB, 'cluster_resources', return_value={'cores': 100}
+        ):
+            db = SlurmDB()
+            summary = db.export_summary('2024-02-01', '2024-02-29')
+        self.assertAlmostEqual(summary['summary']['projected_revenue'], 1392.0)
+
 
 if __name__ == '__main__':
     unittest.main()

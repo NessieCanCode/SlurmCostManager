@@ -12,7 +12,7 @@ This repository now includes a responsive Cockpit UI built with React.  The inte
 - **Detailed cost drill-downs** (core‑hours, GPU-hours) for per‑account transparency.
 - **Historical billing data** accessible from account inception for auditing and trend analysis.
 - **Organization-wide views** consolidating charges across all member Slurm accounts.
-- **Configurable rate table** with per-account overrides, editable from a dedicated Settings tab.
+- **Configurable rate table** with per-account overrides; cluster capacity is detected automatically from `slurm.conf`.
 
 
 ## 📁 Project Structure
