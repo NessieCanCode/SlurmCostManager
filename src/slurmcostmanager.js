@@ -1,4 +1,4 @@
-const { useState, useEffect, useRef, useCallback } = React;
+const { useState, useEffect, useRef, useCallback, useMemo } = React;
 
 // Determine the directory where the plugin's files are installed. When running
 // inside Cockpit, `window.cockpit.manifest.path` points to the plugin root
@@ -50,8 +50,10 @@ function getYearPeriod(year = new Date().getFullYear()) {
 function useBillingData(period) {
   const [data, setData] = useState(null);
   const [error, setError] = useState(null);
+  const requestIdRef = useRef(0);
 
   const load = useCallback(async () => {
+    const id = ++requestIdRef.current;
     try {
       let json;
       if (window.cockpit && window.cockpit.spawn) {
@@ -80,11 +82,15 @@ function useBillingData(period) {
         if (!resp.ok) throw new Error('Failed to fetch billing data');
         json = await resp.json();
       }
-      setData(json);
-      setError(null);
+      if (requestIdRef.current === id) {
+        setData(json);
+        setError(null);
+      }
     } catch (e) {
       console.error(e);
-      setError(e.message || String(e));
+      if (requestIdRef.current === id) {
+        setError(e.message || String(e));
+      }
     }
   }, [period]);
 
@@ -1138,12 +1144,13 @@ function Rates({ onRatesUpdated }) {
 function App() {
   const [view, setView] = useState('year');
   const now = new Date();
-  const defaultMonth = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(
+  const currentYear = now.getFullYear();
+  const defaultMonth = `${currentYear}-${String(now.getMonth() + 1).padStart(
     2,
     '0'
   )}`;
   const [month, setMonth] = useState(defaultMonth);
-  const yearPeriod = getYearPeriod(now.getFullYear());
+  const yearPeriod = useMemo(() => getYearPeriod(currentYear), [currentYear]);
   const period = view === 'year' ? yearPeriod : month;
   const { data, error, reload } = useBillingData(period);
   const [showErrorDetails, setShowErrorDetails] = useState(false);
