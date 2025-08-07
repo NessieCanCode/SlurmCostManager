@@ -101,14 +101,55 @@ function useBillingData(period) {
   return { data, error, reload: load };
 }
 
+function aggregateAccountDetails(details = []) {
+  const map = {};
+  details.forEach(d => {
+    const acct = map[d.account] || {
+      account: d.account,
+      core_hours: 0,
+      gpu_hours: 0,
+      cost: 0,
+      users: {}
+    };
+    acct.core_hours += d.core_hours || 0;
+    acct.gpu_hours += d.gpu_hours || 0;
+    acct.cost += d.cost || 0;
+    (d.users || []).forEach(u => {
+      const user = acct.users[u.user] || {
+        user: u.user,
+        core_hours: 0,
+        cost: 0
+      };
+      user.core_hours += u.core_hours || 0;
+      user.cost += u.cost || 0;
+      acct.users[u.user] = user;
+    });
+    map[d.account] = acct;
+  });
+  return Object.values(map).map(a => ({
+    account: a.account,
+    core_hours: Math.round(a.core_hours * 100) / 100,
+    gpu_hours: Math.round(a.gpu_hours * 100) / 100,
+    cost: Math.round(a.cost * 100) / 100,
+    users: Object.values(a.users).map(u => ({
+      user: u.user,
+      core_hours: Math.round(u.core_hours * 100) / 100,
+      cost: Math.round(u.cost * 100) / 100
+    }))
+  }));
+}
+
 function AccountsChart({ details }) {
   const canvasRef = useRef(null);
   useEffect(() => {
     if (!canvasRef.current) return;
     const ctx = canvasRef.current.getContext('2d');
-    const top = details
+    const aggregated = aggregateAccountDetails(details);
+    const top = aggregated
       .slice()
-      .sort((a, b) => b.core_hours - a.core_hours)
+      .sort(
+        (a, b) => b.core_hours + b.gpu_hours - (a.core_hours + a.gpu_hours)
+      )
       .slice(0, 10);
     const chart = new Chart(ctx, {
       type: 'bar',
@@ -116,9 +157,14 @@ function AccountsChart({ details }) {
         labels: top.map(d => d.account),
         datasets: [
           {
-            label: 'Core Hours',
+            label: 'CPU hrs',
             data: top.map(d => d.core_hours),
             backgroundColor: '#4e79a7'
+          },
+          {
+            label: 'GPU hrs',
+            data: top.map(d => d.gpu_hours),
+            backgroundColor: '#f28e2b'
           }
         ]
       },
@@ -260,23 +306,32 @@ function BulletChart({ actual, target }) {
   return React.createElement('canvas', { ref: canvasRef, className: 'kpi-chart', width: 180, height: 60 });
 }
 
-function HistoricalUsageChart({ monthly = [] }) {
+function HistoricalUsageChart({ data = [] }) {
   const canvasRef = useRef(null);
   useEffect(() => {
-    if (!canvasRef.current || monthly.length === 0) return;
-    const labels = monthly.map(m => m.month);
-    const cpu = monthly.map(m => m.core_hours);
-    const gpu = monthly.map(m => m.gpu_hours || 0);
+    if (!canvasRef.current || data.length === 0) return;
+    const labels = data.map(m => m.month || m.year);
+    const cpu = data.map(m => m.core_hours);
+    const gpu = data.map(m => m.gpu_hours || 0);
+    const isMonthly = !!data[0].month;
     const lastLabel = labels[labels.length - 1];
-    let [year, month] = lastLabel.split('-').map(Number);
     const forecastLabels = [];
-    for (let i = 0; i < 3; i++) {
-      month++;
-      if (month > 12) {
-        month = 1;
-        year++;
+    if (isMonthly) {
+      let [year, month] = lastLabel.split('-').map(Number);
+      for (let i = 0; i < 3; i++) {
+        month++;
+        if (month > 12) {
+          month = 1;
+          year++;
+        }
+        forecastLabels.push(`${year}-${String(month).padStart(2, '0')}`);
       }
-      forecastLabels.push(`${year}-${String(month).padStart(2, '0')}`);
+    } else {
+      let year = Number(lastLabel);
+      for (let i = 0; i < 3; i++) {
+        year++;
+        forecastLabels.push(String(year));
+      }
     }
     const avg =
       cpu.slice(-3).reduce((a, b) => a + b, 0) /
@@ -315,8 +370,12 @@ function HistoricalUsageChart({ monthly = [] }) {
       options: { responsive: false, maintainAspectRatio: false }
     });
     return () => chart.destroy();
-  }, [monthly]);
-  return React.createElement('div', { className: 'chart-container' }, React.createElement('canvas', { ref: canvasRef, width: 600, height: 300 }));
+  }, [data]);
+  return React.createElement(
+    'div',
+    { className: 'chart-container' },
+    React.createElement('canvas', { ref: canvasRef, width: 600, height: 300 })
+  );
 }
 
 function PiConsumptionChart({ details, width = 300, height = 300, legend = true }) {
@@ -541,13 +600,17 @@ function SuccessFailChart({ data }) {
   return React.createElement('div', { className: 'chart-container' }, React.createElement('canvas', { ref: canvasRef, width: 600, height: 300 }));
 }
 
-function Summary({ summary, details = [], daily = [], monthly = [] }) {
+function Summary({ summary, details = [], daily = [], monthly = [], yearly = [] }) {
   const sparklineData = daily.map(d => d.core_hours);
   const gpuSparklineData = daily.map(d => d.gpu_hours || 0);
   const ratio = summary.projected_revenue
     ? summary.total / summary.projected_revenue
     : 1;
   const targetRevenue = summary.projected_revenue || summary.total;
+  const historical = yearly.length ? yearly : monthly;
+  const historicalLabel = yearly.length
+    ? 'Historical CPU/GPU-hrs (yearly)'
+    : 'Historical CPU/GPU-hrs (monthly)';
 
   return React.createElement(
     'div',
@@ -631,8 +694,8 @@ function Summary({ summary, details = [], daily = [], monthly = [] }) {
     ),
     React.createElement('h3', null, 'CPU/GPU-hrs per Slurm account'),
     React.createElement(AccountsChart, { details }),
-    React.createElement('h3', null, 'Historical CPU/GPU-hrs (monthly)'),
-    React.createElement(HistoricalUsageChart, { monthly })
+    React.createElement('h3', null, historicalLabel),
+    React.createElement(HistoricalUsageChart, { data: historical })
   );
 }
 
@@ -1153,6 +1216,12 @@ function App() {
   const yearPeriod = useMemo(() => getYearPeriod(currentYear), [currentYear]);
   const period = view === 'year' ? yearPeriod : month;
   const { data, error, reload } = useBillingData(period);
+  const details = useMemo(() => {
+    if (!data) return [];
+    return view === 'year'
+      ? aggregateAccountDetails(data.details || [])
+      : data.details || [];
+  }, [data, view]);
   const [showErrorDetails, setShowErrorDetails] = useState(false);
   const monthOptions = Array.from(
     { length: now.getMonth() + 1 },
@@ -1230,29 +1299,17 @@ function App() {
       ),
     data &&
       view === 'year' &&
-      React.createElement(
-        React.Fragment,
-        null,
-        React.createElement(Summary, {
-          summary: data.summary,
-          details: data.details,
-          daily: data.daily,
-          monthly: data.monthly
-        }),
-        React.createElement(Details, {
-          details: data.details,
-          daily: data.daily,
-          partitions: data.partitions,
-          accounts: data.accounts,
-          users: data.users,
-          monthOptions: []
-        })
-      ),
+      React.createElement(Summary, {
+        summary: data.summary,
+        details,
+        daily: data.daily,
+        yearly: data.yearly
+      }),
     data &&
       view === 'summary' &&
       React.createElement(Summary, {
         summary: data.summary,
-        details: data.details,
+        details,
         daily: data.daily,
         monthly: data.monthly
       }),
