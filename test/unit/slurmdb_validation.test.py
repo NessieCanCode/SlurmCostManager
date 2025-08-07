@@ -1,7 +1,9 @@
 import unittest
 import json
+import os
+import tempfile
 import pymysql
-from slurmdb import SlurmDB
+from slurmdb import SlurmDB, _find_slurm_conf
 from slurm_schema import extract_schema, extract_schema_from_dump
 
 class SlurmDBValidationTests(unittest.TestCase):
@@ -16,6 +18,22 @@ class SlurmDBValidationTests(unittest.TestCase):
     def test_valid_config_allowed(self):
         db = SlurmDB(host="localhost", port=3306, user="slurm", password="", database="slurm_acct_db", cluster="cluster1")
         self.assertEqual(db.cluster, "cluster1")
+
+    def test_slurm_conf_from_service_file(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            svc = os.path.join(tmp, "slurmctld.service")
+            slurm_conf = os.path.join(tmp, "slurm.conf")
+            with open(svc, "w") as fh:
+                fh.write(f"ConditionPathExists={slurm_conf}\n")
+            with open(slurm_conf, "w") as fh:
+                fh.write("ClusterName=test\n")
+            slurmdbd = os.path.join(tmp, "slurmdbd.conf")
+            with open(slurmdbd, "w") as fh:
+                fh.write("StorageHost=localhost\n")
+            path = _find_slurm_conf([svc])
+            self.assertEqual(path, slurm_conf)
+            db = SlurmDB(slurm_conf=path)
+            self.assertEqual(db._config_file, slurmdbd)
 
     def test_invalid_time_format(self):
         db = SlurmDB()

@@ -63,6 +63,25 @@ def _write_last_run(end_date):
         logging.warning("Failed to write state file %s: %s", STATE_FILE, e)
 
 
+def _find_slurm_conf(service_paths=None):
+    """Return path to slurm.conf by inspecting slurmctld.service."""
+    paths = service_paths or [
+        "/usr/lib/systemd/system/slurmctld.service",
+        "/lib/systemd/system/slurmctld.service",
+        "/etc/systemd/system/slurmctld.service",
+    ]
+    for svc in paths:
+        try:
+            with open(svc) as fh:
+                for line in fh:
+                    line = line.strip()
+                    if line.startswith("ConditionPathExists=") and line.endswith("slurm.conf"):
+                        return line.split("=", 1)[1].strip()
+        except OSError:
+            continue
+    return "/etc/slurm/slurm.conf"
+
+
 class SlurmDB:
     """Simple wrapper around the Slurm accounting database."""
 
@@ -77,7 +96,17 @@ class SlurmDB:
         cluster=None,
         slurm_conf=None,
     ):
-        conf_path = config_file or os.environ.get("SLURMDB_CONF", "/etc/slurm/slurmdbd.conf")
+        slurm_conf_path = (
+            slurm_conf
+            or os.environ.get("SLURM_CONF")
+            or _find_slurm_conf()
+        )
+
+        conf_path = (
+            config_file
+            or os.environ.get("SLURMDB_CONF")
+            or os.path.join(os.path.dirname(slurm_conf_path), "slurmdbd.conf")
+        )
         cfg = self._load_config(conf_path)
 
         self.host = host or os.environ.get("SLURMDB_HOST") or cfg.get("host", "localhost")
@@ -88,7 +117,7 @@ class SlurmDB:
         self._conn = None
         self._tres_map = None
         self._config_file = conf_path
-        self._slurm_conf = slurm_conf or os.environ.get("SLURM_CONF", "/etc/slurm/slurm.conf")
+        self._slurm_conf = slurm_conf_path
         self.cluster = (
             cluster
             or os.environ.get("SLURM_CLUSTER")
