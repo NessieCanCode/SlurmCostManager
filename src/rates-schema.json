@@ -1,14 +1,28 @@
 {
   "$schema": "http://json-schema.org/draft-07/schema#",
   "title": "RatesConfig",
-  "description": "Schema for core hour rate configuration",
+  "description": "Schema for core and GPU hour rate configuration",
   "type": "object",
   "properties": {
     "defaultRate": {
       "type": "number",
       "minimum": 0
     },
+    "defaultGpuRate": {
+      "type": "number",
+      "minimum": 0
+    },
     "historicalRates": {
+      "type": "object",
+      "patternProperties": {
+        "^[0-9]{4}-(0[1-9]|1[0-2])$": {
+          "type": "number",
+          "minimum": 0
+        }
+      },
+      "additionalProperties": false
+    },
+    "historicalGpuRates": {
       "type": "object",
       "patternProperties": {
         "^[0-9]{4}-(0[1-9]|1[0-2])$": {
@@ -25,6 +39,10 @@
           "type": "object",
           "properties": {
             "rate": {
+              "type": "number",
+              "minimum": 0
+            },
+            "gpuRate": {
               "type": "number",
               "minimum": 0
             },

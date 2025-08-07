@@ -1,17 +1,23 @@
 {
   "defaultRate": 0.02,
+  "defaultGpuRate": 0.2,
   "historicalRates": {
     "2024-01": 0.015
   },
+  "historicalGpuRates": {
+    "2024-01": 0.15
+  },
   "overrides": {
     "research": {
-      "rate": 0.01
+      "rate": 0.01,
+      "gpuRate": 0.1
     },
     "education": {
       "discount": 0.5
     },
     "special": {
       "rate": 0.025,
+      "gpuRate": 0.25,
       "discount": 0.1
     }
   }
