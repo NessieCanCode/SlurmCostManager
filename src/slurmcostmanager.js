@@ -866,7 +866,9 @@ function Rates({ onRatesUpdated }) {
         }
         if (cancelled) return;
         const json = JSON.parse(text);
-        setConfig({ defaultRate: json.defaultRate });
+        setConfig({
+          defaultRate: json.defaultRate
+        });
         const ovrs = json.overrides
           ? Object.entries(json.overrides).map(([account, cfg]) => ({
               account,
@@ -945,6 +947,7 @@ function Rates({ onRatesUpdated }) {
       }
 
       const json = { defaultRate };
+
 
       if (overrides.length) {
         const overridesJson = {};

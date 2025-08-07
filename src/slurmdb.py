@@ -5,6 +5,8 @@ import json
 import logging
 import sys
 from datetime import date, datetime, timedelta
+from calendar import monthrange
+from itertools import product
 
 try:
     import pymysql
@@ -123,6 +125,7 @@ class SlurmDB:
             or os.environ.get("SLURM_CLUSTER")
             or self._load_cluster_name(self._slurm_conf)
         )
+        self._cluster_resources = None
 
         self._validate_config()
 
@@ -208,6 +211,78 @@ class SlurmDB:
             except OSError:
                 pass
         return None
+
+    def _expand_nodelist(self, expr):
+        names = []
+        for part in expr.split(','):
+            m = re.match(r'(.*)\[(.*)\](.*)', part)
+            if m:
+                prefix, inner, suffix = m.groups()
+                ranges = []
+                for grp in inner.split(','):
+                    if '-' in grp:
+                        start, end = grp.split('-')
+                        width = len(start)
+                        ranges.append([
+                            f"{int(i):0{width}d}" for i in range(int(start), int(end) + 1)
+                        ])
+                    else:
+                        ranges.append([grp])
+                for combo in product(*ranges):
+                    names.append(prefix + ''.join(combo) + suffix)
+            else:
+                names.append(part)
+        return names
+
+    def _parse_slurm_conf(self, conf_path):
+        totals = {"nodes": 0, "sockets": 0, "cores": 0, "threads": 0, "gres": {}}
+        defaults = {}
+        if not conf_path or not os.path.exists(conf_path):
+            return totals
+        try:
+            with open(conf_path) as fh:
+                for raw in fh:
+                    line = raw.split('#', 1)[0].strip()
+                    if not line:
+                        continue
+                    if line.startswith('NodeName='):
+                        parts = re.split(r'\s+', line)
+                        attrs = defaults.copy()
+                        for part in parts:
+                            if '=' in part:
+                                k, v = part.split('=', 1)
+                                attrs[k] = v
+                        node_expr = attrs.get('NodeName')
+                        if node_expr == 'DEFAULT':
+                            defaults.update(attrs)
+                            continue
+                        nodes = self._expand_nodelist(node_expr)
+                        num_nodes = len(nodes)
+                        sockets = int(attrs.get('Sockets', defaults.get('Sockets', 1)))
+                        cps = int(attrs.get('CoresPerSocket', defaults.get('CoresPerSocket', 1)))
+                        tpc = int(attrs.get('ThreadsPerCore', defaults.get('ThreadsPerCore', 1)))
+                        totals['nodes'] += num_nodes
+                        totals['sockets'] += sockets * num_nodes
+                        totals['cores'] += cps * sockets * num_nodes
+                        totals['threads'] += tpc * cps * sockets * num_nodes
+                        gres_val = attrs.get('Gres', defaults.get('Gres'))
+                        if gres_val:
+                            for gres in gres_val.split(','):
+                                segs = gres.split(':')
+                                name = segs[0]
+                                try:
+                                    count = float(segs[-1])
+                                except ValueError:
+                                    continue
+                                totals['gres'][name] = totals['gres'].get(name, 0) + count * num_nodes
+        except OSError:
+            return totals
+        return totals
+
+    def cluster_resources(self):
+        if self._cluster_resources is None:
+            self._cluster_resources = self._parse_slurm_conf(self._slurm_conf)
+        return self._cluster_resources
 
     def connect(self):
         if pymysql is None:
@@ -552,6 +627,8 @@ class SlurmDB:
         overrides = rates_cfg.get('overrides', {})
         historical = rates_cfg.get('historicalRates', {})
         gpu_historical = rates_cfg.get('historicalGpuRates', {})
+        resources = self.cluster_resources()
+        cluster_cores = resources.get('cores')
 
         for month, accounts in usage.items():
             base_rate = historical.get(month, default_rate)
@@ -636,7 +713,29 @@ class SlurmDB:
             'total': round(total_cost, 2),
             'core_hours': round(total_ch, 2),
             'gpu_hours': round(total_gpu, 2),
+            'cluster': resources,
         }
+        if cluster_cores:
+            start_date = start_dt.date()
+            end_date = end_dt.date()
+            current = date(start_date.year, start_date.month, 1)
+            end_marker = date(end_date.year, end_date.month, 1)
+            projected_revenue = 0.0
+            while current <= end_marker:
+                days_in_month = monthrange(current.year, current.month)[1]
+                month_start = date(current.year, current.month, 1)
+                month_end = date(current.year, current.month, days_in_month)
+                overlap_start = max(month_start, start_date)
+                overlap_end = min(month_end, end_date)
+                if overlap_start <= overlap_end:
+                    days = (overlap_end - overlap_start).days + 1
+                    rate = historical.get(current.strftime('%Y-%m'), default_rate)
+                    projected_revenue += cluster_cores * 24 * days * rate
+                if current.month == 12:
+                    current = date(current.year + 1, 1, 1)
+                else:
+                    current = date(current.year, current.month + 1, 1)
+            summary['summary']['projected_revenue'] = round(projected_revenue, 2)
         summary['daily'] = [
             {
                 'date': d,
