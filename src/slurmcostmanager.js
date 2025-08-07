@@ -1050,6 +1050,7 @@ function Rates({ onRatesUpdated }) {
 function App() {
   const [view, setView] = useState('summary');
   const { data, error, reload } = useBillingData();
+  const [showErrorDetails, setShowErrorDetails] = useState(false);
 
   return React.createElement(
     'div',
@@ -1077,9 +1078,26 @@ function App() {
     view !== 'settings' &&
       error &&
       React.createElement(
-        'p',
+        'div',
         { className: 'error' },
-        `Failed to load data: ${error}`
+        React.createElement(
+          'p',
+          null,
+          'Failed to load data ',
+          React.createElement(
+            'a',
+            {
+              href: '#',
+              onClick: e => {
+                e.preventDefault();
+                setShowErrorDetails(v => !v);
+              }
+            },
+            '(Click here to Learn More)'
+          )
+        ),
+        showErrorDetails &&
+          React.createElement('pre', { className: 'error-details' }, error)
       ),
     data &&
       view === 'summary' &&
