@@ -12,16 +12,29 @@ const PLUGIN_BASE =
     window.cockpit.manifest.path) ||
   '/usr/share/cockpit/slurmcostmanager';
 
-function getBillingPeriod(now = new Date()) {
-  const end = new Date(Date.UTC(now.getFullYear(), now.getMonth(), now.getDate()));
-  const start = new Date(Date.UTC(now.getFullYear(), now.getMonth(), 1));
+function getBillingPeriod(ref = new Date()) {
+  const today = new Date();
+  let year, month, end;
+  if (typeof ref === 'string') {
+    [year, month] = ref.split('-').map(Number);
+    month -= 1;
+    const isCurrent = year === today.getFullYear() && month === today.getMonth();
+    end = isCurrent
+      ? new Date(Date.UTC(today.getFullYear(), today.getMonth(), today.getDate()))
+      : new Date(Date.UTC(year, month + 1, 0));
+  } else {
+    year = ref.getFullYear();
+    month = ref.getMonth();
+    end = new Date(Date.UTC(year, month, ref.getDate()));
+  }
+  const start = new Date(Date.UTC(year, month, 1));
   return {
     start: start.toISOString().slice(0, 10),
     end: end.toISOString().slice(0, 10)
   };
 }
 
-function useBillingData() {
+function useBillingData(month) {
   const [data, setData] = useState(null);
   const [error, setError] = useState(null);
 
@@ -29,7 +42,7 @@ function useBillingData() {
     try {
       let json;
       if (window.cockpit && window.cockpit.spawn) {
-        const { start, end } = getBillingPeriod();
+        const { start, end } = getBillingPeriod(month);
         const args = [
           'python3',
           `${PLUGIN_BASE}/slurmdb.py`,
@@ -53,7 +66,7 @@ function useBillingData() {
       console.error(e);
       setError(e.message || String(e));
     }
-  }, []);
+  }, [month]);
 
   useEffect(() => {
     load();
@@ -1049,8 +1062,18 @@ function Rates({ onRatesUpdated }) {
 
 function App() {
   const [view, setView] = useState('summary');
-  const { data, error, reload } = useBillingData();
+  const now = new Date();
+  const defaultMonth = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(
+    2,
+    '0'
+  )}`;
+  const [month, setMonth] = useState(defaultMonth);
+  const { data, error, reload } = useBillingData(month);
   const [showErrorDetails, setShowErrorDetails] = useState(false);
+  const monthOptions = Array.from(
+    { length: now.getMonth() + 1 },
+    (_, i) => `${now.getFullYear()}-${String(i + 1).padStart(2, '0')}`
+  );
 
   return React.createElement(
     'div',
@@ -1074,6 +1097,23 @@ function App() {
         'Settings'
       )
     ),
+    view !== 'settings' &&
+      React.createElement(
+        'div',
+        { className: 'month-select' },
+        React.createElement(
+          'label',
+          null,
+          'Month: ',
+          React.createElement(
+            'select',
+            { value: month, onChange: e => setMonth(e.target.value) },
+            monthOptions.map(m =>
+              React.createElement('option', { key: m, value: m }, m)
+            )
+          )
+        )
+      ),
     view !== 'settings' && !data && !error && React.createElement('p', null, 'Loading...'),
     view !== 'settings' &&
       error &&
