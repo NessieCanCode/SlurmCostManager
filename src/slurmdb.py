@@ -12,6 +12,19 @@ except ImportError:  # fallback if pymysql is missing
     pymysql = None
 
 
+# Python 3.7 added ``datetime.fromisoformat``. Provide a minimal fallback so the
+# code continues to work on older interpreters where it is unavailable.
+try:  # pragma: no cover - behaviour depends on Python version
+    _fromisoformat = datetime.fromisoformat
+except AttributeError:  # pragma: no cover - executed on Python < 3.7
+    def _fromisoformat(value):
+        for fmt in ("%Y-%m-%dT%H:%M:%S", "%Y-%m-%d %H:%M:%S", "%Y-%m-%d"):
+            try:
+                return datetime.strptime(value, fmt)
+            except ValueError:
+                continue
+        raise ValueError(f"Invalid isoformat string: {value!r}")
+
 STATE_FILE = os.path.expanduser("last_run.json")
 
 JOB_STATE_MAP = {
@@ -138,7 +151,7 @@ class SlurmDB:
             # Convert YYYY-MM-DD strings to a UNIX timestamp so comparisons
             # against numeric time_start/time_end columns work correctly.
             try:
-                dt = datetime.fromisoformat(value)
+                dt = _fromisoformat(value)
                 return int(dt.timestamp())
             except ValueError:
                 pass
@@ -151,7 +164,7 @@ class SlurmDB:
         if isinstance(value, (int, float)):
             return datetime.fromtimestamp(value)
         if isinstance(value, str):
-            return datetime.fromisoformat(value)
+            return _fromisoformat(value)
         raise TypeError("Unsupported time format")
 
     def _load_cluster_name(self, conf_path):
@@ -548,12 +561,12 @@ class SlurmDB:
                 total_gpu += vals.get('gpu_hours', 0.0)
                 total_cost += acct_cost
         start_dt = (
-            datetime.fromisoformat(start_time)
+            _fromisoformat(start_time)
             if isinstance(start_time, str)
             else datetime.fromtimestamp(start_time)
         )
         end_dt = (
-            datetime.fromisoformat(end_time)
+            _fromisoformat(end_time)
             if isinstance(end_time, str)
             else datetime.fromtimestamp(end_time)
         )
@@ -637,7 +650,7 @@ if __name__ == "__main__":
     if args.auto_daily and not args.start and not args.end:
         last = _read_last_run()
         if last:
-            start = datetime.fromisoformat(last).date() + timedelta(days=1)
+            start = _fromisoformat(last).date() + timedelta(days=1)
         else:
             start = date.today() - timedelta(days=1)
         end = date.today() if start < date.today() else start
