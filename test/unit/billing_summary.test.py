@@ -71,6 +71,49 @@ class BillingSummaryTests(unittest.TestCase):
         self.assertAlmostEqual(costs['special'], 0.23)
         self.assertAlmostEqual(summary['summary']['total'], 0.43)
 
+    def test_export_summary_preserves_job_details(self):
+        usage = {
+            '2024-03': {
+                'acct': {
+                    'core_hours': 1.0,
+                    'users': {
+                        'u': {
+                            'core_hours': 1.0,
+                            'jobs': {
+                                '123': {
+                                    'core_hours': 1.0,
+                                    'job_name': 'name',
+                                    'partition': 'p1',
+                                    'start': '1970-01-01T00:00:00',
+                                    'end': '1970-01-01T01:00:00',
+                                    'elapsed': 3600,
+                                    'req_tres': 'cpu=1',
+                                    'alloc_tres': 'cpu=1',
+                                    'state': 'COMPLETED',
+                                }
+                            },
+                        }
+                    },
+                }
+            }
+        }
+        with mock.patch.object(
+            SlurmDB,
+            'aggregate_usage',
+            return_value=(usage, {'daily': {}, 'monthly': {}, 'yearly': {}}),
+        ), mock.patch.object(SlurmDB, 'fetch_invoices', return_value=[]):
+            db = SlurmDB()
+            summary = db.export_summary('2024-03-01', '2024-03-31')
+        job = summary['details'][0]['users'][0]['jobs'][0]
+        self.assertEqual(job['job_name'], 'name')
+        self.assertEqual(job['partition'], 'p1')
+        self.assertEqual(job['start'], '1970-01-01T00:00:00')
+        self.assertEqual(job['end'], '1970-01-01T01:00:00')
+        self.assertEqual(job['elapsed'], 3600)
+        self.assertEqual(job['req_tres'], 'cpu=1')
+        self.assertEqual(job['alloc_tres'], 'cpu=1')
+        self.assertEqual(job['state'], 'COMPLETED')
+
     def test_export_summary_negative_rate(self):
         usage = {
             '2023-10': {

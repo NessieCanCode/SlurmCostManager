@@ -242,8 +242,9 @@ class SlurmDB:
                 cpu_col = "cpus_req"
 
             query = (
-                f"SELECT j.id_job AS jobid, j.account, j.partition, a.user AS user_name, j.time_start, j.time_end, "
-                f"j.tres_alloc, j.{cpu_col} AS cpus_alloc FROM {job_table} AS j "
+                f"SELECT j.id_job AS jobid, j.name AS job_name, j.account, j.partition, "
+                f"a.user AS user_name, j.time_start, j.time_end, j.tres_req, j.tres_alloc, "
+                f"j.{cpu_col} AS cpus_alloc, j.state FROM {job_table} AS j "
                 f"LEFT JOIN {assoc_table} AS a ON j.id_assoc = a.id_assoc "
                 f"WHERE j.time_start >= %s AND j.time_end <= %s"
             )
@@ -312,7 +313,18 @@ class SlurmDB:
             )
             user_entry['core_hours'] += cpus * dur_hours
             job_entry = user_entry['jobs'].setdefault(
-                job, {'core_hours': 0.0}
+                job,
+                {
+                    'core_hours': 0.0,
+                    'job_name': row.get('job_name'),
+                    'partition': partition,
+                    'start': start.isoformat(),
+                    'end': end.isoformat(),
+                    'elapsed': int((end - start).total_seconds()),
+                    'req_tres': row.get('tres_req'),
+                    'alloc_tres': row.get('tres_alloc'),
+                    'state': row.get('state'),
+                },
             )
             job_entry['core_hours'] += cpus * dur_hours
         return agg, totals
@@ -414,6 +426,14 @@ class SlurmDB:
                         jobs.append(
                             {
                                 'job': job,
+                                'job_name': jvals.get('job_name'),
+                                'partition': jvals.get('partition'),
+                                'start': jvals.get('start'),
+                                'end': jvals.get('end'),
+                                'elapsed': jvals.get('elapsed'),
+                                'req_tres': jvals.get('req_tres'),
+                                'alloc_tres': jvals.get('alloc_tres'),
+                                'state': jvals.get('state'),
                                 'core_hours': round(jvals['core_hours'], 2),
                                 'cost': round(j_cost, 2),
                             }
