@@ -452,6 +452,38 @@ class SlurmDB:
             job_entry['core_hours'] += cpus * dur_hours
         return agg, totals
 
+    def fetch_all_accounts(self):
+        """Return a sorted list of all accounts in the cluster."""
+        self.connect()
+        accounts = set()
+        with self._conn.cursor() as cur:
+            try:
+                cur.execute("SHOW TABLES LIKE 'acct_table'")
+                if cur.fetchone():
+                    cur.execute("SELECT name FROM acct_table WHERE deleted = 0")
+                    for row in cur.fetchall():
+                        name = row.get('name')
+                        if name:
+                            accounts.add(name)
+                    return sorted(accounts)
+            except pymysql.err.ProgrammingError:
+                pass
+
+            assoc_table = (
+                f"{self.cluster}_assoc_table" if self.cluster else "assoc_table"
+            )
+            try:
+                cur.execute(
+                    f"SELECT DISTINCT acct FROM {assoc_table} WHERE deleted = 0"
+                )
+                for row in cur.fetchall():
+                    acct = row.get('acct')
+                    if acct:
+                        accounts.add(acct)
+            except pymysql.err.ProgrammingError:
+                pass
+        return sorted(accounts)
+
     def fetch_invoices(self, start_date=None, end_date=None):
         """Fetch invoice metadata from the database if present."""
         if start_date:
@@ -651,6 +683,7 @@ if __name__ == "__main__":
         dest="slurm_conf",
         help="path to slurm.conf for auto cluster detection",
     )
+    parser.add_argument("--accounts", action="store_true", help="list all accounts and exit")
 
     args = parser.parse_args()
 
@@ -659,6 +692,17 @@ if __name__ == "__main__":
         cluster=args.cluster,
         slurm_conf=args.slurm_conf,
     )
+
+    if args.accounts:
+        data = {"accounts": db.fetch_all_accounts()}
+        if args.output in ("-", "/dev/stdout"):
+            json.dump(data, sys.stdout, indent=2, default=str)
+            sys.stdout.write("\n")
+        else:
+            with open(args.output, "w") as fh:
+                json.dump(data, fh, indent=2, default=str)
+            print(f"Wrote {args.output}")
+        sys.exit(0)
 
     def _export_day(day):
         day_str = day.isoformat()

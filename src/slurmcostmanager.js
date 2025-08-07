@@ -892,14 +892,10 @@ function Rates({ onRatesUpdated }) {
       try {
         let json;
         if (window.cockpit && window.cockpit.spawn) {
-          const { start, end } = getBillingPeriod();
           const args = [
             'python3',
             `${PLUGIN_BASE}/slurmdb.py`,
-            '--start',
-            start,
-            '--end',
-            end,
+            '--accounts',
             '--output',
             '-',
           ];
