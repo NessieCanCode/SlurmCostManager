@@ -1,6 +1,7 @@
 import unittest
+import json
 from slurmdb import SlurmDB
-from slurm_schema import extract_schema_from_dump, extract_schema
+from slurm_schema import extract_schema
 
 class SlurmDBValidationTests(unittest.TestCase):
     def test_invalid_cluster_rejected(self):
@@ -150,7 +151,8 @@ class SlurmDBValidationTests(unittest.TestCase):
         self.assertIsNone(db._conn)
 
     def test_fetch_usage_records_uses_cpus_req_if_alloc_missing(self):
-        schema = extract_schema_from_dump('test/test_db_dump.sql')
+        with open('test/example_slurm_schema_for_testing.json') as fh:
+            schema = json.load(fh)
         job_cols = schema.get('localcluster_job_table', [])
 
         class FakeCursor:
