@@ -442,6 +442,7 @@ function SuccessFailChart({ data }) {
 
 function Summary({ summary, details, daily, monthly }) {
   const sparklineData = daily.map(d => d.core_hours);
+  const gpuSparklineData = daily.map(d => d.gpu_hours || 0);
   const ratio = summary.projected_revenue
     ? summary.total / summary.projected_revenue
     : 1;
@@ -477,6 +478,12 @@ function Summary({ summary, details, daily, monthly }) {
             null,
             React.createElement('th', null, 'Total Core Hours'),
             React.createElement('td', null, summary.core_hours)
+          ),
+          React.createElement(
+            'tr',
+            null,
+            React.createElement('th', null, 'Total GPU Hours'),
+            React.createElement('td', null, summary.gpu_hours || 0)
           )
         )
       )
@@ -488,6 +495,12 @@ function Summary({ summary, details, daily, monthly }) {
         label: 'Total CPU-hours',
         value: summary.core_hours,
         renderChart: () => React.createElement(KpiSparkline, { data: sparklineData })
+      }),
+      React.createElement(KpiTile, {
+        label: 'Total GPU-hours',
+        value: summary.gpu_hours,
+        renderChart: () =>
+          React.createElement(KpiSparkline, { data: gpuSparklineData })
       }),
       React.createElement(KpiTile, {
         label: 'Cost recovery ratio',

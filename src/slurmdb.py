@@ -254,7 +254,14 @@ class SlurmDB:
         """Aggregate usage metrics by account and time period."""
         rows = self.fetch_usage_records(start_time, end_time)
         agg = {}
-        totals = {'daily': {}, 'monthly': {}, 'yearly': {}}
+        totals = {
+            'daily': {},
+            'monthly': {},
+            'yearly': {},
+            'daily_gpu': {},
+            'monthly_gpu': {},
+            'yearly_gpu': {},
+        }
         for row in rows:
             start = self._to_datetime(row['time_start'])
             end = self._to_datetime(row['time_end'] or row['time_start'])
@@ -271,20 +278,28 @@ class SlurmDB:
                     cpus = float(row.get('cpus_alloc') or 0)
                 except (TypeError, ValueError):
                     cpus = 0.0
+            gpus = self._parse_tres(row.get('tres_alloc'), 'gpu')
+            if not gpus:
+                gpus = self._parse_tres(row.get('tres_alloc'), 'gres/gpu')
 
             totals['daily'][day] = totals['daily'].get(day, 0.0) + cpus * dur_hours
             totals['monthly'][month] = totals['monthly'].get(month, 0.0) + cpus * dur_hours
             totals['yearly'][year] = totals['yearly'].get(year, 0.0) + cpus * dur_hours
+            totals['daily_gpu'][day] = totals['daily_gpu'].get(day, 0.0) + gpus * dur_hours
+            totals['monthly_gpu'][month] = totals['monthly_gpu'].get(month, 0.0) + gpus * dur_hours
+            totals['yearly_gpu'][year] = totals['yearly_gpu'].get(year, 0.0) + gpus * dur_hours
 
             month_entry = agg.setdefault(month, {})
             acct_entry = month_entry.setdefault(
                 account,
                 {
                     'core_hours': 0.0,
+                    'gpu_hours': 0.0,
                     'users': {},
                 },
             )
             acct_entry['core_hours'] += cpus * dur_hours
+            acct_entry['gpu_hours'] += gpus * dur_hours
             user_entry = acct_entry['users'].setdefault(
                 user, {'core_hours': 0.0, 'jobs': {}}
             )
@@ -345,6 +360,7 @@ class SlurmDB:
             'invoices': [],
         }
         total_ch = 0.0
+        total_gpu = 0.0
         total_cost = 0.0
 
         rates_path = os.path.join(os.path.dirname(__file__), 'rates.json')
@@ -407,11 +423,13 @@ class SlurmDB:
                     {
                         'account': account,
                         'core_hours': round(vals['core_hours'], 2),
+                        'gpu_hours': round(vals.get('gpu_hours', 0.0), 2),
                         'cost': round(acct_cost, 2),
                         'users': users,
                     }
                 )
                 total_ch += vals['core_hours']
+                total_gpu += vals.get('gpu_hours', 0.0)
                 total_cost += acct_cost
         start_dt = (
             datetime.fromisoformat(start_time)
@@ -427,18 +445,31 @@ class SlurmDB:
             'period': f"{start_dt.strftime('%Y-%m-%d')} to {end_dt.strftime('%Y-%m-%d')}",
             'total': round(total_cost, 2),
             'core_hours': round(total_ch, 2),
+            'gpu_hours': round(total_gpu, 2),
         }
         summary['daily'] = [
-            {'date': d, 'core_hours': round(v, 2)}
-            for d, v in sorted(totals['daily'].items())
+            {
+                'date': d,
+                'core_hours': round(totals['daily'].get(d, 0.0), 2),
+                'gpu_hours': round(totals.get('daily_gpu', {}).get(d, 0.0), 2),
+            }
+            for d in sorted(set(totals['daily']) | set(totals.get('daily_gpu', {})))
         ]
         summary['monthly'] = [
-            {'month': m, 'core_hours': round(v, 2)}
-            for m, v in sorted(totals['monthly'].items())
+            {
+                'month': m,
+                'core_hours': round(totals['monthly'].get(m, 0.0), 2),
+                'gpu_hours': round(totals.get('monthly_gpu', {}).get(m, 0.0), 2),
+            }
+            for m in sorted(set(totals['monthly']) | set(totals.get('monthly_gpu', {})))
         ]
         summary['yearly'] = [
-            {'year': y, 'core_hours': round(v, 2)}
-            for y, v in sorted(totals['yearly'].items())
+            {
+                'year': y,
+                'core_hours': round(totals['yearly'].get(y, 0.0), 2),
+                'gpu_hours': round(totals.get('yearly_gpu', {}).get(y, 0.0), 2),
+            }
+            for y in sorted(set(totals['yearly']) | set(totals.get('yearly_gpu', {})))
         ]
         summary['invoices'] = self.fetch_invoices(start_time, end_time)
         return summary

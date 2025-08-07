@@ -10,6 +10,7 @@ class BillingSummaryTests(unittest.TestCase):
             '2023-10': {
                 'acct': {
                     'core_hours': 10.0,
+                    'gpu_hours': 5.0,
                     'users': {
                         'user1': {'core_hours': 10.0, 'jobs': {}}
                     },
@@ -20,7 +21,14 @@ class BillingSummaryTests(unittest.TestCase):
         with mock.patch.object(
             SlurmDB,
             'aggregate_usage',
-            return_value=(usage, {'daily': {}, 'monthly': {}, 'yearly': {}}),
+            return_value=(usage, {
+                'daily': {},
+                'monthly': {},
+                'yearly': {},
+                'daily_gpu': {},
+                'monthly_gpu': {},
+                'yearly_gpu': {},
+            }),
         ):
             with mock.patch.object(SlurmDB, 'fetch_invoices', return_value=invoices):
                 db = SlurmDB()
@@ -28,7 +36,9 @@ class BillingSummaryTests(unittest.TestCase):
         self.assertEqual(summary['summary']['total'], 0.2)
         self.assertEqual(summary['details'][0]['account'], 'acct')
         self.assertEqual(summary['details'][0]['core_hours'], 10.0)
+        self.assertEqual(summary['details'][0]['gpu_hours'], 5.0)
         self.assertEqual(summary['details'][0]['cost'], 0.2)
+        self.assertEqual(summary['summary']['gpu_hours'], 5.0)
         self.assertEqual(summary['invoices'][0]['file'], 'inv1.pdf')
 
     def test_export_summary_applies_overrides_and_discounts(self):
