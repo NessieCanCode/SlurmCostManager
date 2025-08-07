@@ -234,10 +234,10 @@ function BulletChart({ actual, target }) {
   return React.createElement('canvas', { ref: canvasRef, className: 'kpi-chart', width: 180, height: 60 });
 }
 
-function HistoricalUsageChart({ monthly }) {
+function HistoricalUsageChart({ monthly = [] }) {
   const canvasRef = useRef(null);
   useEffect(() => {
-    if (!canvasRef.current) return;
+    if (!canvasRef.current || monthly.length === 0) return;
     const labels = monthly.map(m => m.month);
     const cpu = monthly.map(m => m.core_hours);
     const gpu = monthly.map(m => m.gpu_hours || 0);
@@ -515,7 +515,7 @@ function SuccessFailChart({ data }) {
   return React.createElement('div', { className: 'chart-container' }, React.createElement('canvas', { ref: canvasRef, width: 600, height: 300 }));
 }
 
-function Summary({ summary, details, daily, monthly }) {
+function Summary({ summary, details = [], daily = [], monthly = [] }) {
   const sparklineData = daily.map(d => d.core_hours);
   const gpuSparklineData = daily.map(d => d.gpu_hours || 0);
   const ratio = summary.projected_revenue
