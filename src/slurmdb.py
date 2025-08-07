@@ -5,6 +5,7 @@ import json
 import logging
 import sys
 from datetime import date, datetime, timedelta
+from calendar import monthrange
 
 try:
     import pymysql
@@ -552,6 +553,7 @@ class SlurmDB:
         overrides = rates_cfg.get('overrides', {})
         historical = rates_cfg.get('historicalRates', {})
         gpu_historical = rates_cfg.get('historicalGpuRates', {})
+        cluster_cores = rates_cfg.get('clusterCores')
 
         for month, accounts in usage.items():
             base_rate = historical.get(month, default_rate)
@@ -637,6 +639,27 @@ class SlurmDB:
             'core_hours': round(total_ch, 2),
             'gpu_hours': round(total_gpu, 2),
         }
+        if cluster_cores:
+            start_date = start_dt.date()
+            end_date = end_dt.date()
+            current = date(start_date.year, start_date.month, 1)
+            end_marker = date(end_date.year, end_date.month, 1)
+            projected_revenue = 0.0
+            while current <= end_marker:
+                days_in_month = monthrange(current.year, current.month)[1]
+                month_start = date(current.year, current.month, 1)
+                month_end = date(current.year, current.month, days_in_month)
+                overlap_start = max(month_start, start_date)
+                overlap_end = min(month_end, end_date)
+                if overlap_start <= overlap_end:
+                    days = (overlap_end - overlap_start).days + 1
+                    rate = historical.get(current.strftime('%Y-%m'), default_rate)
+                    projected_revenue += cluster_cores * 24 * days * rate
+                if current.month == 12:
+                    current = date(current.year + 1, 1, 1)
+                else:
+                    current = date(current.year, current.month + 1, 1)
+            summary['summary']['projected_revenue'] = round(projected_revenue, 2)
         summary['daily'] = [
             {
                 'date': d,

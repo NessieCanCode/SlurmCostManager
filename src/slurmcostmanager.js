@@ -866,7 +866,10 @@ function Rates({ onRatesUpdated }) {
         }
         if (cancelled) return;
         const json = JSON.parse(text);
-        setConfig({ defaultRate: json.defaultRate });
+        setConfig({
+          defaultRate: json.defaultRate,
+          clusterCores: json.clusterCores || ''
+        });
         const ovrs = json.overrides
           ? Object.entries(json.overrides).map(([account, cfg]) => ({
               account,
@@ -946,6 +949,16 @@ function Rates({ onRatesUpdated }) {
 
       const json = { defaultRate };
 
+      if (config.clusterCores !== undefined && config.clusterCores !== '') {
+        const cores = parseInt(config.clusterCores, 10);
+        if (!Number.isFinite(cores) || cores < 0) {
+          console.warn('Invalid cluster core count:', config.clusterCores);
+          setError('Invalid cluster core count');
+          return;
+        }
+        json.clusterCores = cores;
+      }
+
       if (overrides.length) {
         const overridesJson = {};
         overrides.forEach(o => {
@@ -1017,6 +1030,22 @@ function Rates({ onRatesUpdated }) {
           value: config.defaultRate,
           onChange: e =>
             setConfig({ ...config, defaultRate: e.target.value })
+        })
+      )
+    ),
+    React.createElement(
+      'div',
+      null,
+      React.createElement(
+        'label',
+        null,
+        'Total Cluster Cores: ',
+        React.createElement('input', {
+          type: 'number',
+          step: '1',
+          value: config.clusterCores,
+          onChange: e =>
+            setConfig({ ...config, clusterCores: e.target.value })
         })
       )
     ),
