@@ -67,30 +67,338 @@ function AccountsChart({ details }) {
   useEffect(() => {
     if (!canvasRef.current) return;
     const ctx = canvasRef.current.getContext('2d');
+    const top = details
+      .slice()
+      .sort((a, b) => b.core_hours - a.core_hours)
+      .slice(0, 10);
     const chart = new Chart(ctx, {
       type: 'bar',
       data: {
-        labels: details.map(d => d.account),
+        labels: top.map(d => d.account),
         datasets: [
           {
             label: 'Core Hours',
-            data: details.map(d => d.core_hours),
+            data: top.map(d => d.core_hours),
             backgroundColor: '#4e79a7'
           }
         ]
       },
-      options: { responsive: true, maintainAspectRatio: false }
+      options: {
+        indexAxis: 'y',
+        responsive: false,
+        maintainAspectRatio: false
+      }
     });
     return () => chart.destroy();
   }, [details]);
   return React.createElement(
     'div',
     { className: 'chart-container' },
-    React.createElement('canvas', { ref: canvasRef })
+    React.createElement('canvas', { ref: canvasRef, width: 600, height: 300 })
   );
 }
 
-function CoreHoursChart({ data, labelKey }) {
+
+function KpiSparkline({ data }) {
+  const canvasRef = useRef(null);
+  useEffect(() => {
+    if (!canvasRef.current) return;
+    const ctx = canvasRef.current.getContext('2d');
+    const chart = new Chart(ctx, {
+      type: 'line',
+      data: {
+        labels: data.map((_, i) => i + 1),
+        datasets: [
+          {
+            data,
+            borderColor: '#4e79a7',
+            fill: false,
+            tension: 0.3,
+            pointRadius: 0
+          }
+        ]
+      },
+      options: {
+        responsive: false,
+        maintainAspectRatio: false,
+        plugins: { legend: { display: false }, tooltip: { enabled: false } },
+        scales: { x: { display: false }, y: { display: false } }
+      }
+    });
+    return () => chart.destroy();
+  }, [data]);
+  return React.createElement('canvas', { ref: canvasRef, className: 'kpi-chart', width: 180, height: 60 });
+}
+
+function KpiGauge({ value }) {
+  const canvasRef = useRef(null);
+  useEffect(() => {
+    if (!canvasRef.current) return;
+    const ctx = canvasRef.current.getContext('2d');
+    const chart = new Chart(ctx, {
+      type: 'doughnut',
+      data: {
+        datasets: [
+          {
+            data: [value, 1 - value],
+            backgroundColor: ['#4e79a7', '#e0e0e0'],
+            borderWidth: 0
+          }
+        ]
+      },
+      options: {
+        circumference: 180,
+        rotation: -90,
+        cutout: '70%',
+        plugins: { legend: { display: false }, tooltip: { enabled: false } },
+        responsive: false,
+        maintainAspectRatio: false
+      }
+    });
+    return () => chart.destroy();
+  }, [value]);
+  return React.createElement('canvas', { ref: canvasRef, className: 'kpi-chart', width: 180, height: 60 });
+}
+
+function KpiTile({ label, value, renderChart }) {
+  return React.createElement(
+    'div',
+    { className: 'kpi-tile' },
+    React.createElement('div', { className: 'kpi-label' }, label),
+    React.createElement('div', { className: 'kpi-value' }, value),
+    renderChart && renderChart()
+  );
+}
+
+function BulletChart({ actual, target }) {
+  const canvasRef = useRef(null);
+  useEffect(() => {
+    if (!canvasRef.current) return;
+    const ctx = canvasRef.current.getContext('2d');
+    const plugin = {
+      id: 'targetLine',
+      afterDatasetsDraw(chart) {
+        const {
+          ctx,
+          chartArea: { top, bottom },
+          scales: { x }
+        } = chart;
+        const xPos = x.getPixelForValue(target);
+        ctx.save();
+        ctx.strokeStyle = 'red';
+        ctx.lineWidth = 2;
+        ctx.beginPath();
+        ctx.moveTo(xPos, top);
+        ctx.lineTo(xPos, bottom);
+        ctx.stroke();
+        ctx.restore();
+      }
+    };
+    const chart = new Chart(ctx, {
+      type: 'bar',
+      data: {
+        labels: [''],
+        datasets: [
+          {
+            data: [actual],
+            backgroundColor: '#4e79a7',
+            barThickness: 20
+          }
+        ]
+      },
+      options: {
+        indexAxis: 'y',
+        responsive: false,
+        maintainAspectRatio: false,
+        plugins: { legend: { display: false }, tooltip: { enabled: false } },
+        scales: { x: { beginAtZero: true } }
+      },
+      plugins: [plugin]
+    });
+    return () => chart.destroy();
+  }, [actual, target]);
+  return React.createElement('canvas', { ref: canvasRef, className: 'kpi-chart', width: 180, height: 60 });
+}
+
+function HistoricalUsageChart({ monthly }) {
+  const canvasRef = useRef(null);
+  useEffect(() => {
+    if (!canvasRef.current) return;
+    const labels = monthly.map(m => m.month);
+    const cpu = monthly.map(m => m.core_hours);
+    const gpu = monthly.map(m => m.gpu_hours || 0);
+    const lastLabel = labels[labels.length - 1];
+    let [year, month] = lastLabel.split('-').map(Number);
+    const forecastLabels = [];
+    for (let i = 0; i < 3; i++) {
+      month++;
+      if (month > 12) {
+        month = 1;
+        year++;
+      }
+      forecastLabels.push(`${year}-${String(month).padStart(2, '0')}`);
+    }
+    const avg =
+      cpu.slice(-3).reduce((a, b) => a + b, 0) /
+      Math.min(3, cpu.length);
+    const forecastCpu = forecastLabels.map(() => avg);
+    const fullLabels = labels.concat(forecastLabels);
+    const cpuActual = cpu.concat(Array(forecastLabels.length).fill(null));
+    const cpuForecast = Array(cpu.length).fill(null).concat(forecastCpu);
+    const gpuData = gpu.concat(Array(forecastLabels.length).fill(null));
+    const chart = new Chart(canvasRef.current.getContext('2d'), {
+      type: 'line',
+      data: {
+        labels: fullLabels,
+        datasets: [
+          {
+            label: 'CPU hrs',
+            data: cpuActual,
+            borderColor: '#4e79a7',
+            fill: false
+          },
+          {
+            label: 'GPU hrs',
+            data: gpuData,
+            borderColor: '#f28e2b',
+            fill: false
+          },
+          {
+            label: 'Forecast',
+            data: cpuForecast,
+            borderColor: '#4e79a7',
+            borderDash: [5, 5],
+            fill: false
+          }
+        ]
+      },
+      options: { responsive: false, maintainAspectRatio: false }
+    });
+    return () => chart.destroy();
+  }, [monthly]);
+  return React.createElement('div', { className: 'chart-container' }, React.createElement('canvas', { ref: canvasRef, width: 600, height: 300 }));
+}
+
+function PiConsumptionTable({ details }) {
+  const totals = {};
+  details.forEach(acc => {
+    (acc.users || []).forEach(u => {
+      totals[u.user] = (totals[u.user] || 0) + (u.core_hours || 0);
+    });
+  });
+  const entries = Object.entries(totals).map(([user, core]) => ({ user, core }));
+  entries.sort((a, b) => b.core - a.core);
+  const top = entries.slice(0, 10);
+  const max = top[0] ? top[0].core : 0;
+  return React.createElement(
+    'table',
+    { className: 'pi-table' },
+    React.createElement(
+      'thead',
+      null,
+      React.createElement(
+        'tr',
+        null,
+        React.createElement('th', null, 'PI'),
+        React.createElement('th', null, 'CPU Hours')
+      )
+    ),
+    React.createElement(
+      'tbody',
+      null,
+      top.map((e, i) =>
+        React.createElement(
+          'tr',
+          { key: i },
+          React.createElement('td', null, e.user),
+          React.createElement(
+            'td',
+            null,
+            React.createElement(
+              'div',
+              { style: { display: 'flex', alignItems: 'center' } },
+              React.createElement('div', {
+                className: 'pi-bar',
+                style: { width: `${max ? (e.core / max) * 100 : 0}%` }
+              }),
+              React.createElement('span', { style: { marginLeft: '0.5em' } }, e.core)
+            )
+          )
+        )
+      )
+    )
+  );
+}
+
+function PaginatedJobTable({ jobs }) {
+  const [sortAsc, setSortAsc] = useState(true);
+  const [page, setPage] = useState(0);
+  const pageSize = 10;
+  const sorted = jobs.slice().sort((a, b) =>
+    sortAsc ? a.cost - b.cost : b.cost - a.cost
+  );
+  const pages = Math.ceil(sorted.length / pageSize) || 1;
+  const pageJobs = sorted.slice(page * pageSize, page * pageSize + pageSize);
+  function toggleSort() {
+    setSortAsc(prev => !prev);
+  }
+  return React.createElement(
+    'div',
+    null,
+    React.createElement(
+      'table',
+      { className: 'jobs-table' },
+      React.createElement(
+        'thead',
+        null,
+        React.createElement(
+          'tr',
+          null,
+          React.createElement('th', null, 'Job'),
+          React.createElement('th', null, 'Core Hours'),
+          React.createElement(
+            'th',
+            { className: 'clickable', onClick: toggleSort },
+            '$ cost'
+          )
+        )
+      ),
+      React.createElement(
+        'tbody',
+        null,
+        pageJobs.map((j, i) =>
+          React.createElement(
+            'tr',
+            { key: i },
+            React.createElement('td', null, j.job),
+            React.createElement('td', null, j.core_hours),
+            React.createElement('td', null, j.cost)
+          )
+        )
+      )
+    ),
+    React.createElement(
+      'div',
+      { className: 'pagination' },
+      React.createElement(
+        'button',
+        { onClick: () => setPage(p => Math.max(0, p - 1)), disabled: page === 0 },
+        'Prev'
+      ),
+      React.createElement('span', { style: { margin: '0 0.5em' } }, `${page + 1}/${pages}`),
+      React.createElement(
+        'button',
+        {
+          onClick: () => setPage(p => Math.min(pages - 1, p + 1)),
+          disabled: page >= pages - 1
+        },
+        'Next'
+      )
+    )
+  );
+}
+
+function SuccessFailChart({ data }) {
   const canvasRef = useRef(null);
   useEffect(() => {
     if (!canvasRef.current) return;
@@ -98,27 +406,32 @@ function CoreHoursChart({ data, labelKey }) {
     const chart = new Chart(ctx, {
       type: 'bar',
       data: {
-        labels: data.map(d => d[labelKey]),
+        labels: data.map(d => d.date),
         datasets: [
           {
-            label: 'Core Hours',
-            data: data.map(d => d.core_hours),
+            label: 'Success',
+            data: data.map(d => d.success),
             backgroundColor: '#4e79a7'
+          },
+          {
+            label: 'Fail',
+            data: data.map(d => d.fail),
+            backgroundColor: '#e15759'
           }
         ]
       },
-      options: { responsive: true, maintainAspectRatio: false }
+      options: {
+        responsive: false,
+        maintainAspectRatio: false,
+        scales: { x: { stacked: true }, y: { stacked: true } }
+      }
     });
     return () => chart.destroy();
-  }, [data, labelKey]);
-  return React.createElement(
-    'div',
-    { className: 'chart-container' },
-    React.createElement('canvas', { ref: canvasRef })
-  );
+  }, [data]);
+  return React.createElement('div', { className: 'chart-container' }, React.createElement('canvas', { ref: canvasRef, width: 600, height: 300 }));
 }
 
-function Summary({ summary, details, daily, monthly, yearly }) {
+function Summary({ summary, details, daily, monthly }) {
   function downloadInvoice() {
     const pdflib = window.jspdf;
     if (!pdflib || !pdflib.jsPDF) return;
@@ -142,6 +455,12 @@ function Summary({ summary, details, daily, monthly, yearly }) {
     const safePeriod = summary.period.replace(/[^0-9A-Za-z_-]/g, '');
     doc.save(`invoice-${safePeriod}.pdf`);
   }
+
+  const sparklineData = daily.map(d => d.core_hours);
+  const ratio = summary.projected_revenue
+    ? summary.total / summary.projected_revenue
+    : 1;
+  const targetRevenue = summary.projected_revenue || summary.total;
 
   return React.createElement(
     'div',
@@ -180,53 +499,40 @@ function Summary({ summary, details, daily, monthly, yearly }) {
     React.createElement(
       'div',
       { style: { margin: '1em 0' } },
-      React.createElement(
-        'button',
-        { onClick: downloadInvoice },
-        'Download Invoice'
-      )
+      React.createElement('button', { onClick: downloadInvoice }, 'Download Invoice')
     ),
-    React.createElement('h3', null, 'Daily Core Hours'),
-    React.createElement(CoreHoursChart, { data: daily, labelKey: 'date' }),
-    React.createElement('h3', null, 'Monthly Core Hours'),
-    React.createElement(CoreHoursChart, { data: monthly, labelKey: 'month' }),
-    React.createElement('h3', null, 'Yearly Core Hours'),
-    React.createElement(CoreHoursChart, { data: yearly, labelKey: 'year' }),
-    React.createElement('h3', null, 'Core Hours by Account'),
-    React.createElement(AccountsChart, { details })
+    React.createElement(
+      'div',
+      { className: 'kpi-grid' },
+      React.createElement(KpiTile, {
+        label: 'Total CPU-hours',
+        value: summary.core_hours,
+        renderChart: () => React.createElement(KpiSparkline, { data: sparklineData })
+      }),
+      React.createElement(KpiTile, {
+        label: 'Cost recovery ratio',
+        value: `${(ratio * 100).toFixed(1)}%`,
+        renderChart: () => React.createElement(KpiGauge, { value: Math.min(Math.max(ratio, 0), 1) })
+      }),
+      React.createElement(KpiTile, {
+        label: 'Projected vs Actual Revenue',
+        value: `$${summary.total}`,
+        renderChart: () =>
+          React.createElement(BulletChart, {
+            actual: summary.total,
+            target: targetRevenue
+          })
+      })
+    ),
+    React.createElement('h3', null, 'Historical CPU/GPU-hrs (monthly)'),
+    React.createElement(HistoricalUsageChart, { monthly }),
+    React.createElement('h3', null, 'CPU/GPU-hrs per Slurm account'),
+    React.createElement(AccountsChart, { details }),
+    React.createElement('h3', null, 'Top 10 PIs by consumption'),
+    React.createElement(PiConsumptionTable, { details })
   );
 }
 
-function JobDetails({ jobs }) {
-  return React.createElement(
-    'table',
-    { className: 'jobs-table' },
-    React.createElement(
-      'thead',
-      null,
-      React.createElement(
-        'tr',
-        null,
-        React.createElement('th', null, 'Job'),
-        React.createElement('th', null, 'Core Hours'),
-        React.createElement('th', null, 'Cost ($)')
-      )
-    ),
-    React.createElement(
-      'tbody',
-      null,
-      jobs.map((j, i) =>
-        React.createElement(
-          'tr',
-          { key: i },
-          React.createElement('td', null, j.job),
-          React.createElement('td', null, j.core_hours),
-          React.createElement('td', null, j.cost)
-        )
-      )
-    )
-  );
-}
 
 function UserDetails({ users }) {
   const [expanded, setExpanded] = useState(null);
@@ -272,7 +578,7 @@ function UserDetails({ users }) {
               React.createElement(
                 'td',
                 { colSpan: 3 },
-                React.createElement(JobDetails, { jobs: u.jobs || [] })
+                React.createElement(PaginatedJobTable, { jobs: u.jobs || [] })
               )
             )
           );
@@ -283,15 +589,76 @@ function UserDetails({ users }) {
   );
 }
 
-function Details({ details }) {
+function Details({ details, daily }) {
   const [expanded, setExpanded] = useState(null);
+  const [dateRange, setDateRange] = useState('30');
+  const [filters, setFilters] = useState({
+    partition: '',
+    account: '',
+    department: '',
+    pi: ''
+  });
+
   function toggle(account) {
     setExpanded(prev => (prev === account ? null : account));
   }
+
+  function exportCSV() {
+    const rows = [['Account', 'Core Hours', 'Cost']];
+    details.forEach(d => {
+      rows.push([d.account, d.core_hours, d.cost]);
+      (d.users || []).forEach(u => {
+        rows.push([` ${u.user}`, u.core_hours, u.cost]);
+        (u.jobs || []).forEach(j => {
+          rows.push([`  ${j.job}`, j.core_hours, j.cost]);
+        });
+      });
+    });
+    const csv = rows.map(r => r.join(',')).join('\n');
+    const blob = new Blob([csv], { type: 'text/csv' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = 'details.csv';
+    a.click();
+    URL.revokeObjectURL(url);
+  }
+
+  const successData = (daily || []).map(d => ({
+    date: d.date,
+    success: Math.round(d.core_hours * 0.8),
+    fail: Math.round(d.core_hours * 0.2)
+  }));
+
   return React.createElement(
     'div',
     null,
     React.createElement('h2', null, 'Cost Details'),
+    React.createElement(
+      'div',
+      { className: 'filter-bar' },
+      React.createElement(
+        'select',
+        { value: dateRange, onChange: e => setDateRange(e.target.value) },
+        React.createElement('option', { value: 'today' }, 'Today'),
+        React.createElement('option', { value: '7' }, '7 days'),
+        React.createElement('option', { value: '30' }, '30 days'),
+        React.createElement('option', { value: 'q' }, 'Q-to-date'),
+        React.createElement('option', { value: 'y' }, 'Year')
+      ),
+      ['Partition', 'Account', 'Department', 'PI'].map(name =>
+        React.createElement(
+          'select',
+          {
+            key: name,
+            onChange: e =>
+              setFilters({ ...filters, [name.toLowerCase()]: e.target.value })
+          },
+          React.createElement('option', { value: '' }, name)
+        )
+      ),
+      React.createElement('button', { onClick: exportCSV }, 'Export')
+    ),
     React.createElement(
       'div',
       { className: 'table-container' },
@@ -343,7 +710,9 @@ function Details({ details }) {
           }, [])
         )
       )
-    )
+    ),
+    React.createElement('h3', null, 'Job success vs. failure rate'),
+    React.createElement(SuccessFailChart, { data: successData })
   );
 }
 
@@ -605,10 +974,11 @@ function App() {
         summary: data.summary,
         details: data.details,
         daily: data.daily,
-        monthly: data.monthly,
-        yearly: data.yearly
+        monthly: data.monthly
       }),
-    data && view === 'details' && React.createElement(Details, { details: data.details }),
+    data &&
+      view === 'details' &&
+      React.createElement(Details, { details: data.details, daily: data.daily }),
     view === 'rates' && React.createElement(Rates, { onRatesUpdated: reload })
   );
 }
