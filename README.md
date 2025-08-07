@@ -9,7 +9,7 @@ This repository now includes a responsive Cockpit UI built with React.  The inte
 - **Monthly billing summaries** displayed right in Cockpit’s navigation menu.
 - **Selectable historical months** lets you view past billing periods for the current year while defaulting to the current month.
 - **Invoice dashboards** to view, download, and archive invoice PDFs.
-- **Detailed cost drill-downs** (core‑hours, instance‑hours, GB‑month) for per‑account transparency.
+- **Detailed cost drill-downs** (core‑hours, GPU-hours) for per‑account transparency.
 - **Historical billing data** accessible from account inception for auditing and trend analysis.
 - **Organization-wide views** consolidating charges across all member Slurm accounts.
 - **Configurable rate table** with per-account overrides, editable from a dedicated Settings tab.
