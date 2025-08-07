@@ -79,6 +79,14 @@ nav button:hover {
   color: red;
 }
 
+.error-details {
+  border: 1px solid #ccc;
+  background: #fdd;
+  padding: 0.5em;
+  white-space: pre-wrap;
+  margin-top: 0.5em;
+}
+
 .clickable {
   cursor: pointer;
 }
