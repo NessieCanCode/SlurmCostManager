@@ -666,9 +666,17 @@ function UserDetails({ users }) {
   );
 }
 
-function Details({ details, daily, partitions = [], accounts = [], users = [] }) {
+function Details({
+  details,
+  daily,
+  partitions = [],
+  accounts = [],
+  users = [],
+  month,
+  onMonthChange,
+  monthOptions = []
+}) {
   const [expanded, setExpanded] = useState(null);
-  const [dateRange, setDateRange] = useState('30');
   const [filters, setFilters] = useState({
     partition: '',
     account: '',
@@ -755,12 +763,10 @@ function Details({ details, daily, partitions = [], accounts = [], users = [] })
       { className: 'filter-bar' },
       React.createElement(
         'select',
-        { value: dateRange, onChange: e => setDateRange(e.target.value) },
-        React.createElement('option', { value: 'today' }, 'Today'),
-        React.createElement('option', { value: '7' }, '7 days'),
-        React.createElement('option', { value: '30' }, '30 days'),
-        React.createElement('option', { value: 'q' }, 'Q-to-date'),
-        React.createElement('option', { value: 'y' }, 'Year')
+        { value: month, onChange: e => onMonthChange(e.target.value) },
+        monthOptions.map(m =>
+          React.createElement('option', { key: m, value: m }, m)
+        )
       ),
       ['Partition', 'Account', 'User'].map(name => {
         const opts =
@@ -1143,7 +1149,7 @@ function App() {
         'Settings'
       )
     ),
-    view !== 'settings' &&
+    view === 'summary' &&
       React.createElement(
         'div',
         { className: 'month-select' },
@@ -1200,7 +1206,10 @@ function App() {
         daily: data.daily,
         partitions: data.partitions,
         accounts: data.accounts,
-        users: data.users
+        users: data.users,
+        month,
+        onMonthChange: setMonth,
+        monthOptions
       }),
     view === 'settings' && React.createElement(Rates, { onRatesUpdated: reload })
   );
