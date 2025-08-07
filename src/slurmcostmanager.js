@@ -51,7 +51,7 @@ function useBillingData() {
       setError(null);
     } catch (e) {
       console.error(e);
-      setError(e);
+      setError(e.message || String(e));
     }
   }, []);
 
@@ -1074,7 +1074,13 @@ function App() {
       )
     ),
     view !== 'settings' && !data && !error && React.createElement('p', null, 'Loading...'),
-    view !== 'settings' && error && React.createElement('p', { className: 'error' }, 'Failed to load data'),
+    view !== 'settings' &&
+      error &&
+      React.createElement(
+        'p',
+        { className: 'error' },
+        `Failed to load data: ${error}`
+      ),
     data &&
       view === 'summary' &&
       React.createElement(Summary, {
