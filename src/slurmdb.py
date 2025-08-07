@@ -241,8 +241,13 @@ class SlurmDB:
             if not cur.fetchone():
                 cpu_col = "cpus_req"
 
+            job_name_col = "job_name"
+            cur.execute(f"SHOW COLUMNS FROM {job_table} LIKE %s", (job_name_col,))
+            if not cur.fetchone():
+                job_name_col = "name"
+
             query = (
-                f"SELECT j.id_job AS jobid, j.name AS job_name, j.account, j.partition, "
+                f"SELECT j.id_job AS jobid, j.{job_name_col} AS job_name, j.account, j.partition, "
                 f"a.user AS user_name, j.time_start, j.time_end, j.tres_req, j.tres_alloc, "
                 f"j.{cpu_col} AS cpus_alloc, j.state FROM {job_table} AS j "
                 f"LEFT JOIN {assoc_table} AS a ON j.id_assoc = a.id_assoc "

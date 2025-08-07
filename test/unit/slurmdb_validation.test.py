@@ -1,7 +1,7 @@
 import unittest
 import json
 from slurmdb import SlurmDB
-from slurm_schema import extract_schema
+from slurm_schema import extract_schema, extract_schema_from_dump
 
 class SlurmDBValidationTests(unittest.TestCase):
     def test_invalid_cluster_rejected(self):
@@ -181,7 +181,14 @@ class SlurmDBValidationTests(unittest.TestCase):
     def test_fetch_usage_records_uses_cpus_req_if_alloc_missing(self):
         with open('test/example_slurm_schema_for_testing.json') as fh:
             schema = json.load(fh)
+        schema_sql = extract_schema_from_dump('test/example_slurmdb_for_testing.sql')
         job_cols = schema.get('localcluster_job_table', [])
+        job_cols_sql = schema_sql.get('localcluster_job_table', [])
+        # ensure schema JSON and SQL dump agree on CPU columns
+        self.assertIn('cpus_req', job_cols)
+        self.assertIn('cpus_req', job_cols_sql)
+        self.assertNotIn('cpus_alloc', job_cols)
+        self.assertNotIn('cpus_alloc', job_cols_sql)
 
         class FakeCursor:
             def __init__(self):
@@ -222,7 +229,60 @@ class SlurmDBValidationTests(unittest.TestCase):
         db.connect = lambda: None
         db.fetch_usage_records(0, 0)
         queries = db._conn.cursor_obj.queries
-        self.assertIn("j.cpus_req AS cpus_alloc", queries[1])
+        self.assertIn("j.cpus_req AS cpus_alloc", queries[-1])
+
+    def test_fetch_usage_records_uses_job_name_column(self):
+        with open('test/example_slurm_schema_for_testing.json') as fh:
+            schema = json.load(fh)
+        schema_sql = extract_schema_from_dump('test/example_slurmdb_for_testing.sql')
+        job_cols = schema.get('localcluster_job_table', [])
+        job_cols_sql = schema_sql.get('localcluster_job_table', [])
+        # ensure schema JSON and SQL dump agree on job name column
+        self.assertIn('job_name', job_cols)
+        self.assertIn('job_name', job_cols_sql)
+        self.assertNotIn('name', job_cols)
+        self.assertNotIn('name', job_cols_sql)
+
+        class FakeCursor:
+            def __init__(self):
+                self.queries = []
+
+            def execute(self, query, params=None):
+                self.queries.append(query)
+                if query.lower().startswith("show columns"):
+                    column = params[0] if params else None
+                    if column in job_cols:
+                        self._fetchone = {'Field': column}
+                    else:
+                        self._fetchone = None
+                else:
+                    self._fetchall = []
+
+            def fetchone(self):
+                return getattr(self, "_fetchone", None)
+
+            def fetchall(self):
+                return getattr(self, "_fetchall", [])
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, exc_type, exc, tb):
+                pass
+
+        class FakeConn:
+            def __init__(self):
+                self.cursor_obj = FakeCursor()
+
+            def cursor(self):
+                return self.cursor_obj
+
+        db = SlurmDB(cluster="localcluster")
+        db._conn = FakeConn()
+        db.connect = lambda: None
+        db.fetch_usage_records(0, 0)
+        queries = db._conn.cursor_obj.queries
+        self.assertIn("j.job_name AS job_name", queries[-1])
 
 if __name__ == '__main__':
     unittest.main()
