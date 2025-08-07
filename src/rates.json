@@ -1,6 +1,7 @@
 {
   "defaultRate": 0.02,
   "defaultGpuRate": 0.2,
+  "clusterCores": 100,
   "historicalRates": {
     "2024-01": 0.015
   },
