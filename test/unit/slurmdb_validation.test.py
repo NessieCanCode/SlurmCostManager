@@ -1,5 +1,6 @@
 import unittest
 import json
+import pymysql
 from slurmdb import SlurmDB
 from slurm_schema import extract_schema, extract_schema_from_dump
 
@@ -131,6 +132,60 @@ class SlurmDBValidationTests(unittest.TestCase):
 
         self.assertTrue(conn.closed)
         self.assertIsNone(db._conn)
+
+    def test_get_tres_map_handles_missing_table(self):
+        db = SlurmDB()
+        db.connect = lambda: None
+
+        class FakeCursor:
+            def __enter__(self):
+                return self
+
+            def __exit__(self, exc_type, exc, tb):
+                pass
+
+            def execute(self, query):
+                raise pymysql.err.ProgrammingError(1146, "Table 'slurm_acct_db.tres' doesn't exist")
+
+            def fetchall(self):
+                return []
+
+        class FakeConn:
+            def cursor(self):
+                return FakeCursor()
+
+        db._conn = FakeConn()
+        tmap = db._get_tres_map()
+        self.assertEqual(tmap, {})
+
+    def test_get_tres_map_uses_tres_table_when_missing_tres(self):
+        db = SlurmDB()
+        db.connect = lambda: None
+
+        class FakeCursor:
+            def __enter__(self):
+                return self
+
+            def __exit__(self, exc_type, exc, tb):
+                pass
+
+            def execute(self, query):
+                self.query = query
+                if "tres_table" not in query:
+                    raise pymysql.err.ProgrammingError(1146, "Table 'slurm_acct_db.tres' doesn't exist")
+
+            def fetchall(self):
+                if "tres_table" in self.query:
+                    return [{"id": 1, "type": "cpu", "name": ""}]
+                return []
+
+        class FakeConn:
+            def cursor(self):
+                return FakeCursor()
+
+        db._conn = FakeConn()
+        tmap = db._get_tres_map()
+        self.assertEqual(tmap, {1: "cpu"})
 
     def test_extract_schema_with_context_manager_closes_connection(self):
         class FakeCursor:

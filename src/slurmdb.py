@@ -243,18 +243,33 @@ class SlurmDB:
         if self._tres_map is None:
             self.connect()
             self._tres_map = {}
-            with self._conn.cursor() as cur:
-                cur.execute("SELECT id, type, name FROM tres")
-                for row in cur.fetchall():
-                    t_type = row.get("type")
-                    t_name = row.get("name")
-                    if t_type == "gres":
-                        name = f"{t_type}/{t_name}" if t_name else t_type
-                    elif t_name:
-                        name = f"{t_type}/{t_name}"
-                    else:
-                        name = t_type
-                    self._tres_map[row["id"]] = name
+            for table in ("tres", "tres_table"):
+                try:
+                    with self._conn.cursor() as cur:
+                        cur.execute(f"SELECT id, type, name FROM {table}")
+                        for row in cur.fetchall():
+                            t_type = row.get("type")
+                            t_name = row.get("name")
+                            if t_type == "gres":
+                                name = f"{t_type}/{t_name}" if t_name else t_type
+                            elif t_name:
+                                name = f"{t_type}/{t_name}"
+                            else:
+                                name = t_type
+                            self._tres_map[row["id"]] = name
+                        break
+                except Exception as e:
+                    # Older Slurm databases might use a different table name
+                    # or not support TRES at all. If a table is missing,
+                    # fall back to the next option or return an empty map.
+                    if not (
+                        pymysql
+                        and isinstance(e, pymysql.err.ProgrammingError)
+                        and e.args
+                        and e.args[0] == 1146
+                    ):
+                        raise
+            # If both queries failed we leave the map empty.
         return self._tres_map
 
     def _tres_to_str(self, tres_str):
