@@ -14,6 +14,21 @@ except ImportError:  # fallback if pymysql is missing
 
 STATE_FILE = os.path.expanduser("last_run.json")
 
+JOB_STATE_MAP = {
+    0: "PENDING",
+    1: "RUNNING",
+    2: "SUSPENDED",
+    3: "COMPLETED",
+    4: "CANCELLED",
+    5: "FAILED",
+    6: "TIMEOUT",
+    7: "NODE_FAIL",
+    8: "PREEMPTED",
+    9: "BOOT_FAIL",
+    10: "DEADLINE",
+    11: "OUT_OF_MEMORY",
+}
+
 
 def _read_last_run():
     """Return the last processed end date from the state file."""
@@ -58,6 +73,7 @@ class SlurmDB:
         self.password = password or os.environ.get("SLURMDB_PASS") or cfg.get("password", "")
         self.database = database or os.environ.get("SLURMDB_DB") or cfg.get("db", "slurm_acct_db")
         self._conn = None
+        self._tres_map = None
         self._config_file = conf_path
         self._slurm_conf = slurm_conf or os.environ.get("SLURM_CONF", "/etc/slurm/slurm.conf")
         self.cluster = (
@@ -223,6 +239,46 @@ class SlurmDB:
                     return 0
         return 0
 
+    def _get_tres_map(self):
+        if self._tres_map is None:
+            self.connect()
+            self._tres_map = {}
+            with self._conn.cursor() as cur:
+                cur.execute("SELECT id, type, name FROM tres")
+                for row in cur.fetchall():
+                    t_type = row.get("type")
+                    t_name = row.get("name")
+                    if t_type == "gres":
+                        name = f"{t_type}/{t_name}" if t_name else t_type
+                    elif t_name:
+                        name = f"{t_type}/{t_name}"
+                    else:
+                        name = t_type
+                    self._tres_map[row["id"]] = name
+        return self._tres_map
+
+    def _tres_to_str(self, tres_str):
+        if not tres_str:
+            return ""
+        tmap = self._get_tres_map()
+        parts = []
+        for part in str(tres_str).split(','):
+            if '=' not in part:
+                continue
+            key, val = part.split('=', 1)
+            try:
+                name = tmap.get(int(key), key)
+            except ValueError:
+                name = key
+            parts.append(f"{name}={val}")
+        return ','.join(parts)
+
+    def _state_to_str(self, state):
+        try:
+            return JOB_STATE_MAP[int(state)]
+        except (TypeError, ValueError, KeyError):
+            return state
+
     def fetch_usage_records(self, start_time, end_time):
         """Fetch raw job records from SlurmDBD."""
         start_time = self._validate_time(start_time, "start_time")
@@ -254,7 +310,12 @@ class SlurmDB:
                 f"WHERE j.time_start >= %s AND j.time_end <= %s"
             )
             cur.execute(query, (start_time, end_time))
-            return cur.fetchall()
+            rows = cur.fetchall()
+            for row in rows:
+                row["tres_req"] = self._tres_to_str(row.get("tres_req"))
+                row["tres_alloc"] = self._tres_to_str(row.get("tres_alloc"))
+                row["state"] = self._state_to_str(row.get("state"))
+            return rows
 
     def aggregate_usage(self, start_time, end_time):
         """Aggregate usage metrics by account and time period."""
