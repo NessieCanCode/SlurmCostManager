@@ -130,6 +130,19 @@ python3 src/slurm_schema.py --output schema.json
 The resulting `schema.json` file can be compared with the list of
 tables and columns from your deployment.
 
+### Testing with sample SlurmDB data
+
+For unit tests and local development the repository includes two fixtures
+under `test/`:
+
+- `example_slurm_schema_for_testing.json` – a pre-generated mapping of
+  tables to columns for a minimal Slurm accounting database.
+- `example_slurmdb_for_testing.sql` – a small SQL dump containing the
+  corresponding table definitions and a few dummy rows.
+
+These files allow tests to verify table and column presence and operate on
+sample data without requiring access to a live SlurmDB instance.
+
 ## 📝 Development Notes
 
 - Your UI components can access system files or commands using `cockpit.file()` and other Cockpit APIs.
