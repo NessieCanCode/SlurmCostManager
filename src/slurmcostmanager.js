@@ -34,7 +34,20 @@ function getBillingPeriod(ref = new Date()) {
   };
 }
 
-function useBillingData(month) {
+function getYearPeriod(year = new Date().getFullYear()) {
+  const today = new Date();
+  const end =
+    year === today.getFullYear()
+      ? new Date(Date.UTC(today.getFullYear(), today.getMonth(), today.getDate()))
+      : new Date(Date.UTC(year, 11, 31));
+  const start = new Date(Date.UTC(year, 0, 1));
+  return {
+    start: start.toISOString().slice(0, 10),
+    end: end.toISOString().slice(0, 10)
+  };
+}
+
+function useBillingData(period) {
   const [data, setData] = useState(null);
   const [error, setError] = useState(null);
 
@@ -42,7 +55,14 @@ function useBillingData(month) {
     try {
       let json;
       if (window.cockpit && window.cockpit.spawn) {
-        const { start, end } = getBillingPeriod(month);
+        let start, end;
+        if (typeof period === 'string') {
+          ({ start, end } = getBillingPeriod(period));
+        } else if (period && period.start && period.end) {
+          ({ start, end } = period);
+        } else {
+          ({ start, end } = getBillingPeriod());
+        }
         const args = [
           'python3',
           `${PLUGIN_BASE}/slurmdb.py`,
@@ -66,7 +86,7 @@ function useBillingData(month) {
       console.error(e);
       setError(e.message || String(e));
     }
-  }, [month]);
+  }, [period]);
 
   useEffect(() => {
     load();
@@ -761,13 +781,17 @@ function Details({
     React.createElement(
       'div',
       { className: 'filter-bar' },
-      React.createElement(
-        'select',
-        { value: month, onChange: e => onMonthChange(e.target.value) },
-        monthOptions.map(m =>
-          React.createElement('option', { key: m, value: m }, m)
-        )
-      ),
+      monthOptions.length > 0 &&
+        React.createElement(
+          'select',
+          {
+            value: month,
+            onChange: e => onMonthChange && onMonthChange(e.target.value)
+          },
+          monthOptions.map(m =>
+            React.createElement('option', { key: m, value: m }, m)
+          )
+        ),
       ['Partition', 'Account', 'User'].map(name => {
         const opts =
           name === 'Partition' ? partitions : name === 'Account' ? accounts : users;
@@ -1112,14 +1136,16 @@ function Rates({ onRatesUpdated }) {
 }
 
 function App() {
-  const [view, setView] = useState('summary');
+  const [view, setView] = useState('year');
   const now = new Date();
   const defaultMonth = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(
     2,
     '0'
   )}`;
   const [month, setMonth] = useState(defaultMonth);
-  const { data, error, reload } = useBillingData(month);
+  const yearPeriod = getYearPeriod(now.getFullYear());
+  const period = view === 'year' ? yearPeriod : month;
+  const { data, error, reload } = useBillingData(period);
   const [showErrorDetails, setShowErrorDetails] = useState(false);
   const monthOptions = Array.from(
     { length: now.getMonth() + 1 },
@@ -1134,18 +1160,23 @@ function App() {
       null,
       React.createElement(
         'button',
+        { onClick: () => setView('year') },
+        'Fiscal Year Overview'
+      ),
+      React.createElement(
+        'button',
         { onClick: () => setView('summary') },
-        'Summary'
+        'Monthly Summary Reports'
       ),
       React.createElement(
         'button',
         { onClick: () => setView('details') },
-        'Details'
+        'Detailed Transactions'
       ),
       React.createElement(
         'button',
         { onClick: () => setView('settings') },
-        'Settings'
+        'Administration'
       )
     ),
     view === 'summary' &&
@@ -1189,6 +1220,26 @@ function App() {
         ),
         showErrorDetails &&
           React.createElement('pre', { className: 'error-details' }, error)
+      ),
+    data &&
+      view === 'year' &&
+      React.createElement(
+        React.Fragment,
+        null,
+        React.createElement(Summary, {
+          summary: data.summary,
+          details: data.details,
+          daily: data.daily,
+          monthly: data.monthly
+        }),
+        React.createElement(Details, {
+          details: data.details,
+          daily: data.daily,
+          partitions: data.partitions,
+          accounts: data.accounts,
+          users: data.users,
+          monthOptions: []
+        })
       ),
     data &&
       view === 'summary' &&
