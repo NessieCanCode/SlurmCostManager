@@ -1,7 +1,7 @@
 {
   "$schema": "http://json-schema.org/draft-07/schema#",
   "title": "RatesConfig",
-  "description": "Schema for core and GPU hour rate configuration",
+  "description": "Schema for core and GPU hour rate configuration; cluster core counts are derived from slurm.conf",
   "type": "object",
   "properties": {
     "defaultRate": {

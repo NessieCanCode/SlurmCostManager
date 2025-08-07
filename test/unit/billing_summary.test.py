@@ -207,7 +207,15 @@ class BillingSummaryTests(unittest.TestCase):
         ), mock.patch.object(SlurmDB, 'fetch_invoices', return_value=[]), mock.patch(
             'builtins.open', side_effect=fake_open
         ), mock.patch.object(
-            SlurmDB, 'cluster_resources', return_value={'cores': 100}
+            SlurmDB,
+            '_parse_slurm_conf',
+            return_value={
+                'nodes': 1,
+                'sockets': 1,
+                'cores': 100,
+                'threads': 1,
+                'gres': {},
+            },
         ):
             db = SlurmDB()
             summary = db.export_summary('2024-02-01', '2024-02-29')
