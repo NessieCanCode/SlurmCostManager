@@ -867,8 +867,7 @@ function Rates({ onRatesUpdated }) {
         if (cancelled) return;
         const json = JSON.parse(text);
         setConfig({
-          defaultRate: json.defaultRate,
-          clusterCores: json.clusterCores || ''
+          defaultRate: json.defaultRate
         });
         const ovrs = json.overrides
           ? Object.entries(json.overrides).map(([account, cfg]) => ({
@@ -949,15 +948,6 @@ function Rates({ onRatesUpdated }) {
 
       const json = { defaultRate };
 
-      if (config.clusterCores !== undefined && config.clusterCores !== '') {
-        const cores = parseInt(config.clusterCores, 10);
-        if (!Number.isFinite(cores) || cores < 0) {
-          console.warn('Invalid cluster core count:', config.clusterCores);
-          setError('Invalid cluster core count');
-          return;
-        }
-        json.clusterCores = cores;
-      }
 
       if (overrides.length) {
         const overridesJson = {};
