@@ -83,12 +83,14 @@ The workflow tags the repository, builds packages, and publishes artifacts to Gi
 
 The `src/slurmdb.py` utility can connect to a running **SlurmDBD** instance and
 export usage metrics as JSON. Connection details are automatically scraped from
-`/etc/slurm/slurmdbd.conf` (or a custom path specified via the environment
-variable `SLURMDB_CONF` or the `--conf` flag). Environment variables
+`slurmdbd.conf` located alongside `slurm.conf` (discovered from
+`slurmctld.service` via the `ConditionPathExists` directive, defaulting to
+`/etc/slurm/slurm.conf`). A custom path can be specified via the environment
+variable `SLURMDB_CONF` or the `--conf` flag. Environment variables
 `SLURMDB_HOST`, `SLURMDB_PORT`, `SLURMDB_USER`, `SLURMDB_PASS` and `SLURMDB_DB`
 override any values found in the configuration file. The cluster prefix used to
-select the job tables is determined from `/etc/slurm/slurm.conf` but can be set
-using `SLURM_CLUSTER`, `--cluster` or `--slurm-conf`.
+select the job tables is determined from the Slurm configuration file. The
+setting can be overridden using `SLURM_CLUSTER`, `--cluster` or `--slurm-conf`.
 
 
 ```bash
