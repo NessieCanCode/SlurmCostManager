@@ -827,6 +827,7 @@ function Details({ details, daily, partitions = [], accounts = [], users = [] })
 function Rates({ onRatesUpdated }) {
   const [config, setConfig] = useState(null);
   const [overrides, setOverrides] = useState([]);
+  const [accounts, setAccounts] = useState([]);
   const [error, setError] = useState(null);
   const [saving, setSaving] = useState(false);
   const [status, setStatus] = useState(null);
@@ -851,7 +852,7 @@ function Rates({ onRatesUpdated }) {
           ? Object.entries(json.overrides).map(([account, cfg]) => ({
               account,
               rate: cfg.rate ?? '',
-              discount: cfg.discount ?? ''
+              discount: cfg.discount != null ? cfg.discount * 100 : ''
             }))
           : [];
         setOverrides(ovrs);
@@ -861,6 +862,41 @@ function Rates({ onRatesUpdated }) {
       }
     }
     load();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  useEffect(() => {
+    let cancelled = false;
+    async function loadAccounts() {
+      try {
+        let json;
+        if (window.cockpit && window.cockpit.spawn) {
+          const { start, end } = getBillingPeriod();
+          const args = [
+            'python3',
+            `${PLUGIN_BASE}/slurmdb.py`,
+            '--start',
+            start,
+            '--end',
+            end,
+            '--output',
+            '-',
+          ];
+          const output = await window.cockpit.spawn(args, { err: 'message' });
+          json = JSON.parse(output);
+        } else {
+          const resp = await fetch('billing.json');
+          if (!resp.ok) throw new Error('Failed to fetch billing data');
+          json = await resp.json();
+        }
+        if (!cancelled) setAccounts(json.accounts || []);
+      } catch (e) {
+        console.error(e);
+      }
+    }
+    loadAccounts();
     return () => {
       cancelled = true;
     };
@@ -911,7 +947,7 @@ function Rates({ onRatesUpdated }) {
           if (o.discount !== '') {
             const discount = parseFloat(o.discount);
             if (Number.isFinite(discount)) {
-              entry.discount = discount;
+              entry.discount = discount / 100;
             } else {
               console.warn(
                 `Ignoring invalid discount for account ${o.account}:`,
@@ -981,7 +1017,7 @@ function Rates({ onRatesUpdated }) {
           null,
           React.createElement('th', null, 'Account'),
           React.createElement('th', null, 'Rate'),
-          React.createElement('th', null, 'Discount'),
+          React.createElement('th', null, 'Discount (%)'),
           React.createElement('th', null)
         )
       ),
@@ -992,12 +1028,22 @@ function Rates({ onRatesUpdated }) {
           React.createElement(
             'tr',
             { key: idx },
-            React.createElement('td', null,
-              React.createElement('input', {
-                value: o.account,
-                onChange: e =>
-                  updateOverride(idx, 'account', e.target.value)
-              })
+            React.createElement(
+              'td',
+              null,
+              React.createElement(
+                'select',
+                {
+                  value: o.account,
+                  onChange: e => updateOverride(idx, 'account', e.target.value)
+                },
+                [
+                  React.createElement('option', { key: '', value: '' }, ''),
+                  ...accounts.map(acct =>
+                    React.createElement('option', { key: acct, value: acct }, acct)
+                  )
+                ]
+              )
             ),
             React.createElement('td', null,
               React.createElement('input', {
@@ -1011,7 +1057,7 @@ function Rates({ onRatesUpdated }) {
             React.createElement('td', null,
               React.createElement('input', {
                 type: 'number',
-                step: '0.01',
+                step: '0.1',
                 value: o.discount,
                 onChange: e =>
                   updateOverride(idx, 'discount', e.target.value)
