@@ -964,12 +964,12 @@ function App() {
       ),
       React.createElement(
         'button',
-        { onClick: () => setView('rates') },
-        'Rates'
+        { onClick: () => setView('settings') },
+        'Settings'
       )
     ),
-    view !== 'rates' && !data && !error && React.createElement('p', null, 'Loading...'),
-    view !== 'rates' && error && React.createElement('p', { className: 'error' }, 'Failed to load data'),
+    view !== 'settings' && !data && !error && React.createElement('p', null, 'Loading...'),
+    view !== 'settings' && error && React.createElement('p', { className: 'error' }, 'Failed to load data'),
     data &&
       view === 'summary' &&
       React.createElement(Summary, {
@@ -981,7 +981,7 @@ function App() {
     data &&
       view === 'details' &&
       React.createElement(Details, { details: data.details, daily: data.daily }),
-    view === 'rates' && React.createElement(Rates, { onRatesUpdated: reload })
+    view === 'settings' && React.createElement(Rates, { onRatesUpdated: reload })
   );
 }
 
