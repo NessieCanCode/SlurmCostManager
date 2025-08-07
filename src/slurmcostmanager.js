@@ -432,30 +432,6 @@ function SuccessFailChart({ data }) {
 }
 
 function Summary({ summary, details, daily, monthly }) {
-  function downloadInvoice() {
-    const pdflib = window.jspdf;
-    if (!pdflib || !pdflib.jsPDF) return;
-    const doc = new pdflib.jsPDF();
-    doc.text(`Invoice for ${summary.period}`, 10, 10);
-    let y = 20;
-    doc.text('Account', 10, y);
-    doc.text('Core Hours', 80, y);
-    doc.text('Cost ($)', 150, y);
-    y += 10;
-    details.forEach(d => {
-      doc.text(String(d.account), 10, y);
-      doc.text(String(d.core_hours), 80, y);
-      doc.text(String(d.cost), 150, y);
-      y += 10;
-      if (y > 280) {
-        doc.addPage();
-        y = 10;
-      }
-    });
-    const safePeriod = summary.period.replace(/[^0-9A-Za-z_-]/g, '');
-    doc.save(`invoice-${safePeriod}.pdf`);
-  }
-
   const sparklineData = daily.map(d => d.core_hours);
   const ratio = summary.projected_revenue
     ? summary.total / summary.projected_revenue
@@ -495,11 +471,6 @@ function Summary({ summary, details, daily, monthly }) {
           )
         )
       )
-    ),
-    React.createElement(
-      'div',
-      { style: { margin: '1em 0' } },
-      React.createElement('button', { onClick: downloadInvoice }, 'Download Invoice')
     ),
     React.createElement(
       'div',
