@@ -85,7 +85,7 @@ function AccountsChart({ details }) {
       },
       options: {
         indexAxis: 'y',
-        responsive: true,
+        responsive: false,
         maintainAspectRatio: false
       }
     });
@@ -94,7 +94,7 @@ function AccountsChart({ details }) {
   return React.createElement(
     'div',
     { className: 'chart-container' },
-    React.createElement('canvas', { ref: canvasRef })
+    React.createElement('canvas', { ref: canvasRef, width: 600, height: 300 })
   );
 }
 
@@ -119,7 +119,7 @@ function KpiSparkline({ data }) {
         ]
       },
       options: {
-        responsive: true,
+        responsive: false,
         maintainAspectRatio: false,
         plugins: { legend: { display: false }, tooltip: { enabled: false } },
         scales: { x: { display: false }, y: { display: false } }
@@ -127,7 +127,7 @@ function KpiSparkline({ data }) {
     });
     return () => chart.destroy();
   }, [data]);
-  return React.createElement('canvas', { ref: canvasRef, className: 'kpi-chart' });
+  return React.createElement('canvas', { ref: canvasRef, className: 'kpi-chart', width: 180, height: 60 });
 }
 
 function KpiGauge({ value }) {
@@ -150,12 +150,14 @@ function KpiGauge({ value }) {
         circumference: 180,
         rotation: -90,
         cutout: '70%',
-        plugins: { legend: { display: false }, tooltip: { enabled: false } }
+        plugins: { legend: { display: false }, tooltip: { enabled: false } },
+        responsive: false,
+        maintainAspectRatio: false
       }
     });
     return () => chart.destroy();
   }, [value]);
-  return React.createElement('canvas', { ref: canvasRef, className: 'kpi-chart' });
+  return React.createElement('canvas', { ref: canvasRef, className: 'kpi-chart', width: 180, height: 60 });
 }
 
 function KpiTile({ label, value, renderChart }) {
@@ -206,7 +208,7 @@ function BulletChart({ actual, target }) {
       },
       options: {
         indexAxis: 'y',
-        responsive: true,
+        responsive: false,
         maintainAspectRatio: false,
         plugins: { legend: { display: false }, tooltip: { enabled: false } },
         scales: { x: { beginAtZero: true } }
@@ -215,7 +217,7 @@ function BulletChart({ actual, target }) {
     });
     return () => chart.destroy();
   }, [actual, target]);
-  return React.createElement('canvas', { ref: canvasRef, className: 'kpi-chart' });
+  return React.createElement('canvas', { ref: canvasRef, className: 'kpi-chart', width: 180, height: 60 });
 }
 
 function HistoricalUsageChart({ monthly }) {
@@ -270,11 +272,11 @@ function HistoricalUsageChart({ monthly }) {
           }
         ]
       },
-      options: { responsive: true, maintainAspectRatio: false }
+      options: { responsive: false, maintainAspectRatio: false }
     });
     return () => chart.destroy();
   }, [monthly]);
-  return React.createElement('div', { className: 'chart-container' }, React.createElement('canvas', { ref: canvasRef }));
+  return React.createElement('div', { className: 'chart-container' }, React.createElement('canvas', { ref: canvasRef, width: 600, height: 300 }));
 }
 
 function PiConsumptionTable({ details }) {
@@ -419,14 +421,14 @@ function SuccessFailChart({ data }) {
         ]
       },
       options: {
-        responsive: true,
+        responsive: false,
         maintainAspectRatio: false,
         scales: { x: { stacked: true }, y: { stacked: true } }
       }
     });
     return () => chart.destroy();
   }, [data]);
-  return React.createElement('div', { className: 'chart-container' }, React.createElement('canvas', { ref: canvasRef }));
+  return React.createElement('div', { className: 'chart-container' }, React.createElement('canvas', { ref: canvasRef, width: 600, height: 300 }));
 }
 
 function Summary({ summary, details, daily, monthly }) {
