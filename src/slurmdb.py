@@ -381,24 +381,32 @@ class SlurmDB:
             logging.error("Failed to parse rates file %s: %s", rates_path, e)
             raise
         default_rate = rates_cfg.get('defaultRate', 0.01)
+        default_gpu_rate = rates_cfg.get('defaultGpuRate', 0.0)
         overrides = rates_cfg.get('overrides', {})
         historical = rates_cfg.get('historicalRates', {})
+        gpu_historical = rates_cfg.get('historicalGpuRates', {})
 
         for month, accounts in usage.items():
             base_rate = historical.get(month, default_rate)
+            base_gpu_rate = gpu_historical.get(month, default_gpu_rate)
             for account, vals in accounts.items():
                 ovr = overrides.get(account, {})
                 rate = ovr.get('rate', base_rate)
+                gpu_rate = ovr.get('gpuRate', base_gpu_rate)
                 discount = ovr.get('discount', 0)
 
                 if rate < 0:
                     raise ValueError(f"Invalid rate {rate} for account {account}")
+                if gpu_rate < 0:
+                    raise ValueError(
+                        f"Invalid GPU rate {gpu_rate} for account {account}"
+                    )
                 if not 0 <= discount <= 1:
                     raise ValueError(
                         f"Invalid discount {discount} for account {account}"
                     )
 
-                acct_cost = vals['core_hours'] * rate
+                acct_cost = vals['core_hours'] * rate + vals.get('gpu_hours', 0.0) * gpu_rate
                 if 0 < discount < 1:
                     acct_cost *= 1 - discount
                 users = []
