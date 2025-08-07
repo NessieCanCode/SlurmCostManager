@@ -591,23 +591,34 @@ function UserDetails({ users }) {
   );
 }
 
-function Details({ details, daily }) {
+function Details({ details, daily, partitions = [], accounts = [], users = [] }) {
   const [expanded, setExpanded] = useState(null);
   const [dateRange, setDateRange] = useState('30');
   const [filters, setFilters] = useState({
     partition: '',
     account: '',
-    department: '',
-    pi: ''
+    user: ''
   });
 
   function toggle(account) {
     setExpanded(prev => (prev === account ? null : account));
   }
 
+  const filteredDetails = details
+    .map(d => {
+      if (filters.account && d.account !== filters.account) return null;
+      let userList = d.users || [];
+      if (filters.user) {
+        userList = userList.filter(u => u.user === filters.user);
+        if (!userList.length) return null;
+      }
+      return { ...d, users: userList };
+    })
+    .filter(Boolean);
+
   function exportCSV() {
     const rows = [['Account', 'Core Hours', 'Cost']];
-    details.forEach(d => {
+    filteredDetails.forEach(d => {
       rows.push([d.account, d.core_hours, d.cost]);
       (d.users || []).forEach(u => {
         rows.push([` ${u.user}`, u.core_hours, u.cost]);
@@ -648,17 +659,21 @@ function Details({ details, daily }) {
         React.createElement('option', { value: 'q' }, 'Q-to-date'),
         React.createElement('option', { value: 'y' }, 'Year')
       ),
-      ['Partition', 'Account', 'Department', 'PI'].map(name =>
-        React.createElement(
+      ['Partition', 'Account', 'User'].map(name => {
+        const opts =
+          name === 'Partition' ? partitions : name === 'Account' ? accounts : users;
+        const key = name.toLowerCase();
+        return React.createElement(
           'select',
           {
             key: name,
-            onChange: e =>
-              setFilters({ ...filters, [name.toLowerCase()]: e.target.value })
+            value: filters[key],
+            onChange: e => setFilters({ ...filters, [key]: e.target.value })
           },
-          React.createElement('option', { value: '' }, name)
-        )
-      ),
+          React.createElement('option', { value: '' }, name),
+          opts.map(o => React.createElement('option', { key: o, value: o }, o))
+        );
+      }),
       React.createElement('button', { onClick: exportCSV }, 'Export')
     ),
     React.createElement(
@@ -681,7 +696,7 @@ function Details({ details, daily }) {
         React.createElement(
           'tbody',
           null,
-          details.reduce((acc, d) => {
+          filteredDetails.reduce((acc, d) => {
             acc.push(
               React.createElement(
                 'tr',
@@ -980,7 +995,13 @@ function App() {
       }),
     data &&
       view === 'details' &&
-      React.createElement(Details, { details: data.details, daily: data.daily }),
+      React.createElement(Details, {
+        details: data.details,
+        daily: data.daily,
+        partitions: data.partitions,
+        accounts: data.accounts,
+        users: data.users
+      }),
     view === 'settings' && React.createElement(Rates, { onRatesUpdated: reload })
   );
 }
