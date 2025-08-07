@@ -164,20 +164,6 @@ nav button:hover {
   height: 60px;
   display: block;
 }
-.pi-table {
-  width: 100%;
-  border-collapse: collapse;
-  margin-top: 1em;
-}
-.pi-table th,
-.pi-table td {
-  border: 1px solid #ccc;
-  padding: 0.25em 0.5em;
-}
-.pi-bar {
-  height: 8px;
-  background: #4e79a7;
-}
 .filter-bar {
   display: flex;
   flex-wrap: wrap;

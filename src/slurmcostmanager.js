@@ -279,54 +279,62 @@ function HistoricalUsageChart({ monthly }) {
   return React.createElement('div', { className: 'chart-container' }, React.createElement('canvas', { ref: canvasRef, width: 600, height: 300 }));
 }
 
-function PiConsumptionTable({ details }) {
-  const totals = {};
-  details.forEach(acc => {
-    (acc.users || []).forEach(u => {
-      totals[u.user] = (totals[u.user] || 0) + (u.core_hours || 0);
+function PiConsumptionChart({ details }) {
+  const canvasRef = useRef(null);
+  useEffect(() => {
+    if (!canvasRef.current) return;
+
+    const totals = {};
+    details.forEach(acc => {
+      (acc.users || []).forEach(u => {
+        totals[u.user] = (totals[u.user] || 0) + (u.core_hours || 0);
+      });
     });
-  });
-  const entries = Object.entries(totals).map(([user, core]) => ({ user, core }));
-  entries.sort((a, b) => b.core - a.core);
-  const top = entries.slice(0, 10);
-  const max = top[0] ? top[0].core : 0;
+
+    const entries = Object.entries(totals).map(([user, core]) => ({ user, core }));
+    entries.sort((a, b) => b.core - a.core);
+    const top = entries.slice(0, 10);
+
+    const colors = [
+      '#4e79a7',
+      '#f28e2b',
+      '#e15759',
+      '#76b7b2',
+      '#59a14f',
+      '#edc949',
+      '#af7aa1',
+      '#ff9da7',
+      '#9c755f',
+      '#bab0ac'
+    ];
+
+    const chart = new Chart(canvasRef.current.getContext('2d'), {
+      type: 'pie',
+      data: {
+        labels: top.map(e => e.user),
+        datasets: [
+          {
+            data: top.map(e => e.core),
+            backgroundColor: colors.slice(0, top.length)
+          }
+        ]
+      },
+      options: {
+        responsive: false,
+        maintainAspectRatio: false,
+        plugins: {
+          legend: { position: 'right' }
+        }
+      }
+    });
+
+    return () => chart.destroy();
+  }, [details]);
+
   return React.createElement(
-    'table',
-    { className: 'pi-table' },
-    React.createElement(
-      'thead',
-      null,
-      React.createElement(
-        'tr',
-        null,
-        React.createElement('th', null, 'PI'),
-        React.createElement('th', null, 'CPU Hours')
-      )
-    ),
-    React.createElement(
-      'tbody',
-      null,
-      top.map((e, i) =>
-        React.createElement(
-          'tr',
-          { key: i },
-          React.createElement('td', null, e.user),
-          React.createElement(
-            'td',
-            null,
-            React.createElement(
-              'div',
-              { style: { display: 'flex', alignItems: 'center' } },
-              React.createElement('div', {
-                className: 'pi-bar',
-                style: { width: `${max ? (e.core / max) * 100 : 0}%` }
-              }),
-              React.createElement('span', { style: { marginLeft: '0.5em' } }, e.core)
-            )
-          )
-        )
-      )
-    )
+    'div',
+    { className: 'chart-container', style: { width: '300px', height: '300px' } },
+    React.createElement('canvas', { ref: canvasRef, width: 300, height: 300 })
   );
 }
 
@@ -496,7 +504,7 @@ function Summary({ summary, details, daily, monthly }) {
       })
     ),
     React.createElement('h3', null, 'Top 10 PIs by consumption'),
-    React.createElement(PiConsumptionTable, { details }),
+    React.createElement(PiConsumptionChart, { details }),
     React.createElement('h3', null, 'CPU/GPU-hrs per Slurm account'),
     React.createElement(AccountsChart, { details }),
     React.createElement('h3', null, 'Historical CPU/GPU-hrs (monthly)'),
