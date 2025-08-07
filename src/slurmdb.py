@@ -242,7 +242,7 @@ class SlurmDB:
                 cpu_col = "cpus_req"
 
             query = (
-                f"SELECT j.id_job AS jobid, j.account, a.user AS user_name, j.time_start, j.time_end, "
+                f"SELECT j.id_job AS jobid, j.account, j.partition, a.user AS user_name, j.time_start, j.time_end, "
                 f"j.tres_alloc, j.{cpu_col} AS cpus_alloc FROM {job_table} AS j "
                 f"LEFT JOIN {assoc_table} AS a ON j.id_assoc = a.id_assoc "
                 f"WHERE j.time_start >= %s AND j.time_end <= %s"
@@ -261,6 +261,9 @@ class SlurmDB:
             'daily_gpu': {},
             'monthly_gpu': {},
             'yearly_gpu': {},
+            'partitions': set(),
+            'accounts': set(),
+            'users': set(),
         }
         for row in rows:
             start = self._to_datetime(row['time_start'])
@@ -271,6 +274,7 @@ class SlurmDB:
             year = start.strftime('%Y')
             account = row.get('account') or 'unknown'
             user = row.get('user_name') or 'unknown'
+            partition = row.get('partition') or 'unknown'
             job = str(row.get('jobid') or 'unknown')
             cpus = self._parse_tres(row.get('tres_alloc'), 'cpu')
             if not cpus:
@@ -288,6 +292,9 @@ class SlurmDB:
             totals['daily_gpu'][day] = totals['daily_gpu'].get(day, 0.0) + gpus * dur_hours
             totals['monthly_gpu'][month] = totals['monthly_gpu'].get(month, 0.0) + gpus * dur_hours
             totals['yearly_gpu'][year] = totals['yearly_gpu'].get(year, 0.0) + gpus * dur_hours
+            totals['partitions'].add(partition)
+            totals['accounts'].add(account)
+            totals['users'].add(user)
 
             month_entry = agg.setdefault(month, {})
             acct_entry = month_entry.setdefault(
@@ -472,6 +479,9 @@ class SlurmDB:
             for y in sorted(set(totals['yearly']) | set(totals.get('yearly_gpu', {})))
         ]
         summary['invoices'] = self.fetch_invoices(start_time, end_time)
+        summary['partitions'] = sorted(totals.get('partitions', []))
+        summary['accounts'] = sorted(totals.get('accounts', []))
+        summary['users'] = sorted(totals.get('users', []))
         return summary
 
 
