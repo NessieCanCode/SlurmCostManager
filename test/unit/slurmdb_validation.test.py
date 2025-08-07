@@ -66,6 +66,34 @@ class SlurmDBValidationTests(unittest.TestCase):
         agg, totals = db.aggregate_usage(0, 3600)
         self.assertAlmostEqual(agg['1970-01']['acct']['core_hours'], 2.0)
 
+    def test_aggregate_usage_includes_job_details(self):
+        db = SlurmDB()
+        db.fetch_usage_records = lambda start, end: [
+            {
+                'jobid': 123,
+                'job_name': 'jobname',
+                'account': 'acct',
+                'user_name': 'user',
+                'partition': 'p1',
+                'time_start': 0,
+                'time_end': 3600,
+                'tres_req': 'cpu=1,mem=1G',
+                'tres_alloc': 'cpu=1,mem=1G,gres/gpu:tesla=1',
+                'cpus_alloc': 1,
+                'state': 'COMPLETED',
+            }
+        ]
+        agg, _ = db.aggregate_usage(0, 3600)
+        job = agg['1970-01']['acct']['users']['user']['jobs']['123']
+        self.assertEqual(job['job_name'], 'jobname')
+        self.assertEqual(job['partition'], 'p1')
+        self.assertEqual(job['start'], '1970-01-01T00:00:00')
+        self.assertEqual(job['end'], '1970-01-01T01:00:00')
+        self.assertEqual(job['elapsed'], 3600)
+        self.assertEqual(job['req_tres'], 'cpu=1,mem=1G')
+        self.assertEqual(job['alloc_tres'], 'cpu=1,mem=1G,gres/gpu:tesla=1')
+        self.assertEqual(job['state'], 'COMPLETED')
+
     def test_close_closes_connection(self):
         class FakeConn:
             def __init__(self):

@@ -339,6 +339,52 @@ function PiConsumptionChart({ details, width = 300, height = 300, legend = true 
   );
 }
 
+function parseTRES(tres) {
+  const result = { cpu: '', mem: '', node: '', gpu: '', gpuType: '' };
+  if (!tres) return result;
+  tres.split(',').forEach(part => {
+    const [key, val] = part.split('=');
+    if (key === 'cpu') result.cpu = val;
+    else if (key === 'mem') result.mem = val;
+    else if (key === 'node') result.node = val;
+    else if (key && key.startsWith('gres/gpu')) {
+      const pieces = key.split(':');
+      result.gpu = val;
+      if (pieces[1]) result.gpuType = pieces[1];
+    }
+  });
+  return result;
+}
+
+function formatReqTres(tres) {
+  const t = parseTRES(tres);
+  return `cpu=${t.cpu} mem=${t.mem} node=${t.node} gres/gpu=${t.gpu}`;
+}
+
+function formatAllocTres(tres) {
+  const t = parseTRES(tres);
+  const gpu = t.gpu
+    ? t.gpuType
+      ? `gres/gpu:(${t.gpuType})=${t.gpu}`
+      : `gres/gpu=${t.gpu}`
+    : '';
+  return `cpu=${t.cpu} mem=${t.mem} node=${t.node} ${gpu}`.trim();
+}
+
+function formatElapsed(sec) {
+  if (typeof sec !== 'number') return '';
+  const h = Math.floor(sec / 3600)
+    .toString()
+    .padStart(2, '0');
+  const m = Math.floor((sec % 3600) / 60)
+    .toString()
+    .padStart(2, '0');
+  const s = Math.floor(sec % 60)
+    .toString()
+    .padStart(2, '0');
+  return `${h}:${m}:${s}`;
+}
+
 function PaginatedJobTable({ jobs }) {
   const [sortAsc, setSortAsc] = useState(true);
   const [page, setPage] = useState(0);
@@ -363,12 +409,20 @@ function PaginatedJobTable({ jobs }) {
         React.createElement(
           'tr',
           null,
-          React.createElement('th', null, 'Job'),
+          React.createElement('th', null, 'JobID'),
+          React.createElement('th', null, 'JobName'),
+          React.createElement('th', null, 'Partition'),
+          React.createElement('th', null, 'Start'),
+          React.createElement('th', null, 'End'),
+          React.createElement('th', null, 'Elapsed'),
+          React.createElement('th', null, 'ReqTRES'),
+          React.createElement('th', null, 'AllocTRES'),
+          React.createElement('th', null, 'State'),
           React.createElement('th', null, 'Core Hours'),
           React.createElement(
             'th',
             { className: 'clickable', onClick: toggleSort },
-            '$ cost'
+            '$ Cost'
           )
         )
       ),
@@ -380,6 +434,14 @@ function PaginatedJobTable({ jobs }) {
             'tr',
             { key: i },
             React.createElement('td', null, j.job),
+            React.createElement('td', null, j.job_name || ''),
+            React.createElement('td', null, j.partition || ''),
+            React.createElement('td', null, j.start || ''),
+            React.createElement('td', null, j.end || ''),
+            React.createElement('td', null, formatElapsed(j.elapsed)),
+            React.createElement('td', null, formatReqTres(j.req_tres)),
+            React.createElement('td', null, formatAllocTres(j.alloc_tres)),
+            React.createElement('td', null, j.state || ''),
             React.createElement('td', null, j.core_hours),
             React.createElement('td', null, j.cost)
           )
@@ -617,13 +679,41 @@ function Details({ details, daily, partitions = [], accounts = [], users = [] })
     .filter(Boolean);
 
   function exportCSV() {
-    const rows = [['Account', 'Core Hours', 'Cost']];
+    const rows = [
+      [
+        'Account',
+        'User',
+        'JobID',
+        'JobName',
+        'Partition',
+        'Start',
+        'End',
+        'Elapsed',
+        'ReqTRES',
+        'AllocTRES',
+        'State',
+        'Core Hours',
+        'Cost'
+      ]
+    ];
     filteredDetails.forEach(d => {
-      rows.push([d.account, d.core_hours, d.cost]);
       (d.users || []).forEach(u => {
-        rows.push([` ${u.user}`, u.core_hours, u.cost]);
         (u.jobs || []).forEach(j => {
-          rows.push([`  ${j.job}`, j.core_hours, j.cost]);
+          rows.push([
+            d.account,
+            u.user,
+            j.job,
+            j.job_name || '',
+            j.partition || '',
+            j.start || '',
+            j.end || '',
+            formatElapsed(j.elapsed),
+            formatReqTres(j.req_tres),
+            formatAllocTres(j.alloc_tres),
+            j.state || '',
+            j.core_hours,
+            j.cost
+          ]);
         });
       });
     });
