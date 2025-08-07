@@ -148,7 +148,7 @@ nav button:hover {
   flex: 0 0 200px;
   position: relative;
   width: 200px;
-  height: 120px;
+  min-height: 120px;
 
 }
 .kpi-label {

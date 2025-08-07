@@ -165,7 +165,8 @@ function KpiTile({ label, value, renderChart }) {
     'div',
     { className: 'kpi-tile' },
     React.createElement('div', { className: 'kpi-label' }, label),
-    React.createElement('div', { className: 'kpi-value' }, value),
+    value !== undefined && value !== null &&
+      React.createElement('div', { className: 'kpi-value' }, value),
     renderChart && renderChart()
   );
 }
@@ -279,7 +280,7 @@ function HistoricalUsageChart({ monthly }) {
   return React.createElement('div', { className: 'chart-container' }, React.createElement('canvas', { ref: canvasRef, width: 600, height: 300 }));
 }
 
-function PiConsumptionChart({ details }) {
+function PiConsumptionChart({ details, width = 300, height = 300, legend = true }) {
   const canvasRef = useRef(null);
   useEffect(() => {
     if (!canvasRef.current) return;
@@ -323,18 +324,18 @@ function PiConsumptionChart({ details }) {
         responsive: false,
         maintainAspectRatio: false,
         plugins: {
-          legend: { position: 'right' }
+          legend: legend ? { position: 'right' } : { display: false }
         }
       }
     });
 
     return () => chart.destroy();
-  }, [details]);
+  }, [details, width, height, legend]);
 
   return React.createElement(
     'div',
-    { className: 'chart-container', style: { width: '300px', height: '300px' } },
-    React.createElement('canvas', { ref: canvasRef, width: 300, height: 300 })
+    { className: 'chart-container', style: { width: `${width}px`, height: `${height}px` } },
+    React.createElement('canvas', { ref: canvasRef, width, height })
   );
 }
 
@@ -500,6 +501,17 @@ function Summary({ summary, details, daily, monthly }) {
           React.createElement(BulletChart, {
             actual: summary.total,
             target: targetRevenue
+          })
+      }),
+      React.createElement(KpiTile, {
+        label: 'Top 10 PIs',
+        value: null,
+        renderChart: () =>
+          React.createElement(PiConsumptionChart, {
+            details,
+            width: 120,
+            height: 120,
+            legend: false
           })
       })
     ),
