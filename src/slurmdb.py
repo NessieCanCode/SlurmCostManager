@@ -8,6 +8,7 @@ from datetime import date, datetime, timedelta
 from calendar import monthrange
 from itertools import product
 
+
 try:
     import pymysql
 except ImportError:  # fallback if pymysql is missing

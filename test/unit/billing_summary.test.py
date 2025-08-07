@@ -196,6 +196,7 @@ class BillingSummaryTests(unittest.TestCase):
         def fake_open(path, *args, **kwargs):
             if path.endswith('rates.json'):
                 return io.StringIO('{"defaultRate": 0.02}')
+
             return open_orig(path, *args, **kwargs)
 
         open_orig = open
