@@ -1,6 +1,8 @@
 DIST=dist
-COCKPIT_DIR=$(HOME)/.local/share/cockpit
-COCKPIT_TARGET=$(COCKPIT_DIR)/slurmcostmanager
+COCKPIT_DEVEL_DIR=$(HOME)/.local/share/cockpit
+COCKPIT_PROD_DIR=/usr/share/cockpit
+COCKPIT_DEVEL_TARGET=$(COCKPIT_DEVEL_DIR)/slurmcostmanager
+COCKPIT_PROD_TARGET=$(COCKPIT_PROD_DIR)/slurmcostmanager
 VERSION:=$(shell jq -r .version manifest.json)
 DATE:=$(shell date +%Y-%m-%d)
 RPMBUILD?=rpmbuild
@@ -16,19 +18,21 @@ build: org.cockpit_project.slurmcostmanager.metainfo.xml
 >cp -r src/* $(DIST)/
 >cp manifest.json $(DIST)/
 >cp org.cockpit_project.slurmcostmanager.metainfo.xml $(DIST)/
+>mkdir -p $(COCKPIT_PROD_DIR)
+>ln -sfn $(abspath $(DIST)) $(COCKPIT_PROD_TARGET)
 
 clean:
 >rm -rf $(DIST) rpmbuild debbuild slurmcostmanager-*.tar.gz slurmcostmanager_*.deb org.cockpit_project.slurmcostmanager.metainfo.xml
 
 devel-install: build
->mkdir -p $(COCKPIT_DIR)
->ln -sfn $(abspath $(DIST)) $(COCKPIT_TARGET)
+>mkdir -p $(COCKPIT_DEVEL_DIR)
+>ln -sfn $(abspath $(DIST)) $(COCKPIT_DEVEL_TARGET)
 
 devel-uninstall:
->@if [ -L $(COCKPIT_TARGET) ]; then \
->rm $(COCKPIT_TARGET); \
+>@if [ -L $(COCKPIT_DEVEL_TARGET) ]; then \
+>rm $(COCKPIT_DEVEL_TARGET); \
 >else \
->echo "No symlink to remove at $(COCKPIT_TARGET)"; \
+>echo "No symlink to remove at $(COCKPIT_DEVEL_TARGET)"; \
 >fi
 
 watch:
