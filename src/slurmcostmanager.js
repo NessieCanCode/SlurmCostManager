@@ -1023,22 +1023,6 @@ function Rates({ onRatesUpdated }) {
         })
       )
     ),
-    React.createElement(
-      'div',
-      null,
-      React.createElement(
-        'label',
-        null,
-        'Total Cluster Cores: ',
-        React.createElement('input', {
-          type: 'number',
-          step: '1',
-          value: config.clusterCores,
-          onChange: e =>
-            setConfig({ ...config, clusterCores: e.target.value })
-        })
-      )
-    ),
     React.createElement('h3', null, 'Account Overrides'),
     React.createElement(
       'table',
