@@ -517,7 +517,7 @@ function Summary({ summary, details, daily, monthly }) {
           })
       }),
       React.createElement(KpiTile, {
-        label: 'Top 10 PIs',
+        label: 'Top 10 Accounts',
         value: null,
         renderChart: () =>
           React.createElement(PiConsumptionChart, {
