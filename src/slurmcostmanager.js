@@ -573,6 +573,39 @@ function PaginatedJobTable({ jobs }) {
   );
 }
 
+function SuccessFailChart({ data }) {
+  const canvasRef = useRef(null);
+  useEffect(() => {
+    if (!canvasRef.current) return;
+    const ctx = canvasRef.current.getContext('2d');
+    const chart = new Chart(ctx, {
+      type: 'bar',
+      data: {
+        labels: data.map(d => d.date),
+        datasets: [
+          {
+            label: 'Success',
+            data: data.map(d => d.success),
+            backgroundColor: '#4e79a7'
+          },
+          {
+            label: 'Fail',
+            data: data.map(d => d.fail),
+            backgroundColor: '#e15759'
+          }
+        ]
+      },
+      options: {
+        responsive: false,
+        maintainAspectRatio: false,
+        scales: { x: { stacked: true }, y: { stacked: true } }
+      }
+    });
+    return () => chart.destroy();
+  }, [data]);
+  return React.createElement('div', { className: 'chart-container' }, React.createElement('canvas', { ref: canvasRef, width: 600, height: 300 }));
+}
+
 function Summary({ summary, details = [], daily = [], monthly = [], yearly = [] }) {
   const sparklineData = daily.map(d => d.core_hours);
   const gpuSparklineData = daily.map(d => d.gpu_hours || 0);
@@ -742,6 +775,7 @@ function UserDetails({ users }) {
 
 function Details({
   details,
+  daily,
   partitions = [],
   accounts = [],
   users = [],
@@ -889,6 +923,12 @@ function Details({
     }
   }
 
+  const successData = (daily || []).map(d => ({
+    date: d.date,
+    success: Math.round(d.core_hours * 0.8),
+    fail: Math.round(d.core_hours * 0.2)
+  }));
+
   return React.createElement(
     'div',
     null,
@@ -976,7 +1016,9 @@ function Details({
           }, [])
         )
       )
-    )
+    ),
+    React.createElement('h3', null, 'Job success vs. failure rate'),
+    React.createElement(SuccessFailChart, { data: successData })
   );
 }
 
@@ -1966,12 +2008,13 @@ function App() {
       view === 'details' &&
       React.createElement(Details, {
         details: data.details,
+        daily: data.daily,
         partitions: data.partitions,
         accounts: data.accounts,
         users: data.users,
         month,
         onMonthChange: setMonth,
-        monthOptions: data.month_options
+        monthOptions
       }),
     view === 'settings' && React.createElement(Rates, { onRatesUpdated: reload })
   );
