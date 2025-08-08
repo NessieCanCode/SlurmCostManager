@@ -692,10 +692,22 @@ function Summary({ summary, details = [], daily = [], monthly = [], yearly = [] 
           })
       })
     ),
-    React.createElement('h3', null, 'CPU/GPU-hrs per Slurm account'),
-    React.createElement(AccountsChart, { details }),
-    React.createElement('h3', null, historicalLabel),
-    React.createElement(HistoricalUsageChart, { data: historical })
+    React.createElement(
+      'div',
+      { className: 'summary-charts' },
+      React.createElement(
+        'div',
+        { className: 'summary-chart' },
+        React.createElement('h3', null, 'CPU/GPU-hrs per Slurm account'),
+        React.createElement(AccountsChart, { details })
+      ),
+      React.createElement(
+        'div',
+        { className: 'summary-chart' },
+        React.createElement('h3', null, historicalLabel),
+        React.createElement(HistoricalUsageChart, { data: historical })
+      )
+    )
   );
 }
 

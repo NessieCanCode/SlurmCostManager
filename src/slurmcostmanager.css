@@ -186,3 +186,16 @@ nav button:hover {
 .pagination {
   margin-top: 0.5em;
 }
+
+/* Layout for side-by-side summary charts */
+.summary-charts {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 1em;
+  margin-top: 1em;
+}
+
+.summary-chart {
+  flex: 1;
+  min-width: 300px;
+}
