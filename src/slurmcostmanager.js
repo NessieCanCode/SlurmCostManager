@@ -852,7 +852,10 @@ function Details({
     const a = document.createElement('a');
     a.href = url;
     a.download = 'details.csv';
+    // Append link to DOM so browsers will download the file
+    document.body.appendChild(a);
     a.click();
+    document.body.removeChild(a);
     URL.revokeObjectURL(url);
   }
 
@@ -918,7 +921,10 @@ function Details({
       const a = document.createElement('a');
       a.href = url;
       a.download = 'recharge_invoice.pdf';
+      // Append link to DOM so browsers will download the file
+      document.body.appendChild(a);
       a.click();
+      document.body.removeChild(a);
       URL.revokeObjectURL(url);
     } catch (e) {
       console.error(e);
