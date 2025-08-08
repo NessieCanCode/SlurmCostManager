@@ -1038,7 +1038,7 @@ function InstitutionProfile() {
     React.createElement(
       'p',
       null,
-      "Enter your university's name, contact details, and other key information"
+      "Manage your university’s information, primary contacts, and fiscal settings."
     ),
     React.createElement(
       'div',
