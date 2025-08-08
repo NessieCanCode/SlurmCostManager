@@ -855,6 +855,74 @@ function Details({
     URL.revokeObjectURL(url);
   }
 
+  async function exportInvoice() {
+    const totals = filteredDetails.reduce(
+      (acc, d) => {
+        acc.core += d.core_hours || 0;
+        acc.gpu += d.gpu_hours || 0;
+        acc.cost += d.cost || 0;
+        return acc;
+      },
+      { core: 0, gpu: 0, cost: 0 }
+    );
+    const rate = totals.core ? totals.cost / totals.core : 0;
+    const invoiceData = {
+      invoice_number: `INV-${Date.now()}`,
+      date_issued: new Date().toLocaleDateString(),
+      fiscal_year: new Date().getFullYear().toString(),
+      due_date: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toLocaleDateString(),
+      items: [
+        {
+          description: 'HPC Compute Hours',
+          period: month || '',
+          qty_units: `${totals.core.toFixed(2)} CPU Hours`,
+          rate: `$${rate.toFixed(2)}`,
+          amount: `$${(rate * totals.core).toFixed(2)}`
+        },
+        {
+          description: 'GPU Usage',
+          period: month || '',
+          qty_units: `${totals.gpu.toFixed(2)} GPU Hours`,
+          rate: `$${rate.toFixed(2)}`,
+          amount: `$${(rate * totals.gpu).toFixed(2)}`
+        }
+      ],
+      subtotal: totals.cost,
+      tax: 0,
+      total_due: totals.cost,
+      bank_info: [
+        'Bank Name: University Bank',
+        'Account Number: 123456789',
+        'Routing Number: 987654321',
+        `Reference: INV-${Date.now()}`
+      ],
+      notes:
+        'Thank you for your prompt payment. For questions regarding this invoice, please contact our office.'
+    };
+    try {
+      const output = await window.cockpit.spawn(
+        ['python3', `${PLUGIN_BASE}/invoice.py`],
+        { input: JSON.stringify(invoiceData), err: 'message' }
+      );
+      const byteChars = atob(output.trim());
+      const byteNumbers = new Array(byteChars.length);
+      for (let i = 0; i < byteChars.length; i++) {
+        byteNumbers[i] = byteChars.charCodeAt(i);
+      }
+      const blob = new Blob([new Uint8Array(byteNumbers)], {
+        type: 'application/pdf'
+      });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = 'recharge_invoice.pdf';
+      a.click();
+      URL.revokeObjectURL(url);
+    } catch (e) {
+      console.error(e);
+    }
+  }
+
   const successData = (daily || []).map(d => ({
     date: d.date,
     success: Math.round(d.core_hours * 0.8),
@@ -894,7 +962,8 @@ function Details({
           opts.map(o => React.createElement('option', { key: o, value: o }, o))
         );
       }),
-      React.createElement('button', { onClick: exportCSV }, 'Export')
+      React.createElement('button', { onClick: exportCSV }, 'Export CSV'),
+      React.createElement('button', { onClick: exportInvoice }, 'Export Invoice')
     ),
     React.createElement(
       'div',
