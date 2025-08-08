@@ -789,6 +789,7 @@ function Details({
     account: '',
     user: ''
   });
+  const [error, setError] = useState(null);
 
   function toggle(account) {
     setExpanded(prev => (prev === account ? null : account));
@@ -851,7 +852,10 @@ function Details({
     const a = document.createElement('a');
     a.href = url;
     a.download = 'details.csv';
+    // Append link to DOM so browsers will download the file
+    document.body.appendChild(a);
     a.click();
+    document.body.removeChild(a);
     URL.revokeObjectURL(url);
   }
 
@@ -900,9 +904,10 @@ function Details({
         'Thank you for your prompt payment. For questions regarding this invoice, please contact our office.'
     };
     try {
+      setError(null);
       const output = await window.cockpit.spawn(
         ['python3', `${PLUGIN_BASE}/invoice.py`],
-        { input: JSON.stringify(invoiceData), err: 'message' }
+        { input: JSON.stringify(invoiceData), err: 'out' }
       );
       const byteChars = atob(output.trim());
       const byteNumbers = new Array(byteChars.length);
@@ -916,10 +921,14 @@ function Details({
       const a = document.createElement('a');
       a.href = url;
       a.download = 'recharge_invoice.pdf';
+      // Append link to DOM so browsers will download the file
+      document.body.appendChild(a);
       a.click();
+      document.body.removeChild(a);
       URL.revokeObjectURL(url);
     } catch (e) {
       console.error(e);
+      setError(e.message || String(e));
     }
   }
 
@@ -957,7 +966,13 @@ function Details({
         );
       }),
       React.createElement('button', { onClick: exportCSV }, 'Export CSV'),
-      React.createElement('button', { onClick: exportInvoice }, 'Export Invoice')
+      React.createElement('button', { onClick: exportInvoice }, 'Export Invoice'),
+      error &&
+        React.createElement(
+          'span',
+          { className: 'error', style: { marginLeft: '0.5em' } },
+          error
+        )
     ),
     React.createElement(
       'div',
