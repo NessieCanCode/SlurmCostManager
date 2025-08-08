@@ -923,12 +923,6 @@ function Details({
     }
   }
 
-  const successData = (daily || []).map(d => ({
-    date: d.date,
-    success: Math.round(d.core_hours * 0.8),
-    fail: Math.round(d.core_hours * 0.2)
-  }));
-
   return React.createElement(
     'div',
     null,
@@ -1016,9 +1010,7 @@ function Details({
           }, [])
         )
       )
-    ),
-    React.createElement('h3', null, 'Job success vs. failure rate'),
-    React.createElement(SuccessFailChart, { data: successData })
+    )
   );
 }
 
