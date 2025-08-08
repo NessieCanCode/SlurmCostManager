@@ -54,6 +54,12 @@ function useBillingData(period) {
 
   const load = useCallback(async () => {
     const id = ++requestIdRef.current;
+    // Clear out existing data while loading a new period so that views
+    // such as "Detailed Transactions" don't momentarily display data
+    // from the previously selected period (e.g. the fiscal year) when
+    // navigating directly between views.
+    setData(null);
+    setError(null);
     try {
       let json;
       if (window.cockpit && window.cockpit.spawn) {
