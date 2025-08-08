@@ -954,19 +954,46 @@ function Details({
 }
 
 
+function HelpIcon({ text }) {
+  return React.createElement('span', { className: 'help-icon', title: text }, ' (?)');
+}
+
+function CollapsibleSection({ title, children, defaultOpen = true }) {
+  const [open, setOpen] = useState(defaultOpen);
+  return React.createElement(
+    'div',
+    { className: 'collapsible-panel' },
+    React.createElement(
+      'div',
+      { className: 'collapsible-header', onClick: () => setOpen(!open) },
+      React.createElement('span', null, title),
+      React.createElement('span', null, open ? '▲' : '▼')
+    ),
+    open && React.createElement('div', { className: 'collapsible-content' }, children)
+  );
+}
+
 function InstitutionProfile() {
   const [profile, setProfile] = useState({
     institutionName: '',
+    institutionAbbreviation: '',
+    campusDivision: '',
+    institutionType: '',
+    primaryContact: { fullName: '', title: '', email: '', phone: '' },
+    secondaryContact: { fullName: '', email: '', phone: '' },
     streetAddress: '',
     city: '',
     state: '',
     postalCode: '',
     country: '',
+    fiscalYearStartMonth: '',
     defaultCurrency: 'USD',
     departmentName: '',
     costCenter: '',
+    notes: '',
     logo: ''
   });
+  const [initialProfile, setInitialProfile] = useState(profile);
   const [status, setStatus] = useState(null);
   const [error, setError] = useState(null);
   const baseDir = PLUGIN_BASE;
@@ -985,7 +1012,18 @@ function InstitutionProfile() {
         }
         if (cancelled) return;
         const json = JSON.parse(text);
-        setProfile(p => ({ ...p, ...json }));
+        setProfile(p => ({
+          ...p,
+          ...json,
+          primaryContact: { ...p.primaryContact, ...(json.primaryContact || {}) },
+          secondaryContact: { ...p.secondaryContact, ...(json.secondaryContact || {}) }
+        }));
+        setInitialProfile(p => ({
+          ...p,
+          ...json,
+          primaryContact: { ...p.primaryContact, ...(json.primaryContact || {}) },
+          secondaryContact: { ...p.secondaryContact, ...(json.secondaryContact || {}) }
+        }));
       } catch (e) {
         console.error(e);
       }
@@ -1000,6 +1038,20 @@ function InstitutionProfile() {
     setProfile(prev => ({ ...prev, [field]: value }));
   }
 
+  function updatePrimary(field, value) {
+    setProfile(prev => ({
+      ...prev,
+      primaryContact: { ...prev.primaryContact, [field]: value }
+    }));
+  }
+
+  function updateSecondary(field, value) {
+    setProfile(prev => ({
+      ...prev,
+      secondaryContact: { ...prev.secondaryContact, [field]: value }
+    }));
+  }
+
   function handleLogo(e) {
     const file = e.target.files && e.target.files[0];
     if (!file) return;
@@ -1008,6 +1060,12 @@ function InstitutionProfile() {
       setProfile(prev => ({ ...prev, logo: reader.result }));
     };
     reader.readAsDataURL(file);
+  }
+
+  function cancel() {
+    setProfile(initialProfile);
+    setStatus(null);
+    setError(null);
   }
 
   async function save() {
@@ -1025,11 +1083,81 @@ function InstitutionProfile() {
         });
       }
       setStatus('Saved');
+      setInitialProfile(profile);
     } catch (e) {
       console.error(e);
       setError('Failed to save profile');
     }
   }
+
+  const states = [
+    'Alabama',
+    'Alaska',
+    'Arizona',
+    'Arkansas',
+    'California',
+    'Colorado',
+    'Connecticut',
+    'Delaware',
+    'Florida',
+    'Georgia',
+    'Hawaii',
+    'Idaho',
+    'Illinois',
+    'Indiana',
+    'Iowa',
+    'Kansas',
+    'Kentucky',
+    'Louisiana',
+    'Maine',
+    'Maryland',
+    'Massachusetts',
+    'Michigan',
+    'Minnesota',
+    'Mississippi',
+    'Missouri',
+    'Montana',
+    'Nebraska',
+    'Nevada',
+    'New Hampshire',
+    'New Jersey',
+    'New Mexico',
+    'New York',
+    'North Carolina',
+    'North Dakota',
+    'Ohio',
+    'Oklahoma',
+    'Oregon',
+    'Pennsylvania',
+    'Rhode Island',
+    'South Carolina',
+    'South Dakota',
+    'Tennessee',
+    'Texas',
+    'Utah',
+    'Vermont',
+    'Virginia',
+    'Washington',
+    'West Virginia',
+    'Wisconsin',
+    'Wyoming'
+  ];
+  const countries = ['USA', 'Canada', 'Mexico', 'United Kingdom', 'Germany'];
+  const months = [
+    'January',
+    'February',
+    'March',
+    'April',
+    'May',
+    'June',
+    'July',
+    'August',
+    'September',
+    'October',
+    'November',
+    'December'
+  ];
+  const currencies = ['USD', 'CAD', 'EUR', 'GBP', 'AUD', 'JPY'];
 
   return React.createElement(
     'div',
@@ -1042,159 +1170,382 @@ function InstitutionProfile() {
     ),
     React.createElement(
       'div',
-      null,
-      React.createElement(
-        'label',
-        null,
-        'Logo: ',
-        React.createElement('input', {
-          type: 'file',
-          accept: 'image/*',
-          onChange: handleLogo
-        })
-      ),
-      profile.logo &&
-        React.createElement('img', {
-          src: profile.logo,
-          alt: 'Logo',
-          className: 'institution-logo-preview'
-        })
+      { className: 'institution-banner' },
+      profile.logo
+        ? React.createElement('img', {
+            src: profile.logo,
+            alt: 'Logo',
+            className: 'institution-logo-preview'
+          })
+        : React.createElement('div', { className: 'institution-logo-preview' }),
+      React.createElement('input', {
+        type: 'file',
+        accept: 'image/*',
+        onChange: handleLogo
+      })
     ),
     React.createElement(
-      'div',
-      null,
+      CollapsibleSection,
+      { title: 'Institutional Identification' },
       React.createElement(
-        'label',
+        'div',
         null,
-        'Institution Name: ',
-        React.createElement('input', {
-          type: 'text',
-          value: profile.institutionName,
-          onChange: e => update('institutionName', e.target.value)
-        })
-      )
-    ),
-    React.createElement(
-      'div',
-      null,
-      React.createElement(
-        'label',
-        null,
-        'Street Address: ',
-        React.createElement('input', {
-          type: 'text',
-          value: profile.streetAddress,
-          onChange: e => update('streetAddress', e.target.value)
-        })
-      )
-    ),
-    React.createElement(
-      'div',
-      null,
-      React.createElement(
-        'label',
-        null,
-        'City: ',
-        React.createElement('input', {
-          type: 'text',
-          value: profile.city,
-          onChange: e => update('city', e.target.value)
-        })
-      )
-    ),
-    React.createElement(
-      'div',
-      null,
-      React.createElement(
-        'label',
-        null,
-        'State/Province: ',
-        React.createElement('input', {
-          type: 'text',
-          value: profile.state,
-          onChange: e => update('state', e.target.value)
-        })
-      )
-    ),
-    React.createElement(
-      'div',
-      null,
-      React.createElement(
-        'label',
-        null,
-        'Postal Code: ',
-        React.createElement('input', {
-          type: 'text',
-          value: profile.postalCode,
-          onChange: e => update('postalCode', e.target.value)
-        })
-      )
-    ),
-    React.createElement(
-      'div',
-      null,
-      React.createElement(
-        'label',
-        null,
-        'Country: ',
-        React.createElement('input', {
-          type: 'text',
-          value: profile.country,
-          onChange: e => update('country', e.target.value)
-        })
-      )
-    ),
-    React.createElement(
-      'div',
-      null,
-      React.createElement(
-        'label',
-        null,
-        'Default Currency: ',
         React.createElement(
-          'select',
-          {
-            value: profile.defaultCurrency,
-            onChange: e => update('defaultCurrency', e.target.value)
-          },
-          ['USD', 'EUR', 'GBP', 'CAD', 'AUD'].map(c =>
-            React.createElement('option', { key: c, value: c }, c)
+          'label',
+          null,
+          'Institution Name',
+          React.createElement('span', { className: 'required' }, '*'),
+          ': ',
+          React.createElement('input', {
+            type: 'text',
+            value: profile.institutionName,
+            onChange: e => update('institutionName', e.target.value)
+          })
+        )
+      ),
+      React.createElement(
+        'div',
+        null,
+        React.createElement(
+          'label',
+          null,
+          'Institution Abbreviation: ',
+          React.createElement('input', {
+            type: 'text',
+            value: profile.institutionAbbreviation,
+            onChange: e => update('institutionAbbreviation', e.target.value)
+          })
+        )
+      ),
+      React.createElement(
+        'div',
+        null,
+        React.createElement(
+          'label',
+          null,
+          'Campus/Division: ',
+          React.createElement('input', {
+            type: 'text',
+            value: profile.campusDivision,
+            onChange: e => update('campusDivision', e.target.value)
+          })
+        )
+      ),
+      React.createElement(
+        'div',
+        null,
+        React.createElement(
+          'label',
+          null,
+          'Institution Type',
+          React.createElement(HelpIcon, {
+            text: 'Select the category that best describes your institution.'
+          }),
+          ': ',
+          React.createElement(
+            'select',
+            {
+              value: profile.institutionType,
+              onChange: e => update('institutionType', e.target.value)
+            },
+            ['Public University', 'Private University', 'Community College', 'Other'].map(
+              t => React.createElement('option', { key: t, value: t }, t)
+            )
           )
         )
       )
     ),
     React.createElement(
-      'div',
-      null,
+      CollapsibleSection,
+      { title: 'Contact Information' },
+      React.createElement('h4', null, 'Primary Contact'),
       React.createElement(
-        'label',
+        'div',
         null,
-        'Recharge Unit/Department Name: ',
-        React.createElement('input', {
-          type: 'text',
-          value: profile.departmentName,
-          onChange: e => update('departmentName', e.target.value)
-        })
+        React.createElement(
+          'label',
+          null,
+          'Full Name',
+          React.createElement('span', { className: 'required' }, '*'),
+          ': ',
+          React.createElement('input', {
+            type: 'text',
+            value: profile.primaryContact.fullName,
+            onChange: e => updatePrimary('fullName', e.target.value)
+          })
+        )
+      ),
+      React.createElement(
+        'div',
+        null,
+        React.createElement(
+          'label',
+          null,
+          'Title/Role',
+          React.createElement('span', { className: 'required' }, '*'),
+          ': ',
+          React.createElement('input', {
+            type: 'text',
+            value: profile.primaryContact.title,
+            onChange: e => updatePrimary('title', e.target.value)
+          })
+        )
+      ),
+      React.createElement(
+        'div',
+        null,
+        React.createElement(
+          'label',
+          null,
+          'Email',
+          React.createElement('span', { className: 'required' }, '*'),
+          ': ',
+          React.createElement('input', {
+            type: 'email',
+            value: profile.primaryContact.email,
+            onChange: e => updatePrimary('email', e.target.value)
+          })
+        )
+      ),
+      React.createElement(
+        'div',
+        null,
+        React.createElement(
+          'label',
+          null,
+          'Phone',
+          React.createElement('span', { className: 'required' }, '*'),
+          ': ',
+          React.createElement('input', {
+            type: 'tel',
+            value: profile.primaryContact.phone,
+            onChange: e => updatePrimary('phone', e.target.value)
+          })
+        )
+      ),
+      React.createElement('h4', null, 'Secondary Contact (Optional)'),
+      React.createElement(
+        'div',
+        null,
+        React.createElement(
+          'label',
+          null,
+          'Full Name: ',
+          React.createElement('input', {
+            type: 'text',
+            value: profile.secondaryContact.fullName,
+            onChange: e => updateSecondary('fullName', e.target.value)
+          })
+        )
+      ),
+      React.createElement(
+        'div',
+        null,
+        React.createElement(
+          'label',
+          null,
+          'Email: ',
+          React.createElement('input', {
+            type: 'email',
+            value: profile.secondaryContact.email,
+            onChange: e => updateSecondary('email', e.target.value)
+          })
+        )
+      ),
+      React.createElement(
+        'div',
+        null,
+        React.createElement(
+          'label',
+          null,
+          'Phone: ',
+          React.createElement('input', {
+            type: 'tel',
+            value: profile.secondaryContact.phone,
+            onChange: e => updateSecondary('phone', e.target.value)
+          })
+        )
+      )
+    ),
+    React.createElement(
+      CollapsibleSection,
+      { title: 'Address & Operational Settings' },
+      React.createElement(
+        'div',
+        null,
+        React.createElement(
+          'label',
+          null,
+          'Street Address',
+          React.createElement('span', { className: 'required' }, '*'),
+          ': ',
+          React.createElement('input', {
+            type: 'text',
+            value: profile.streetAddress,
+            onChange: e => update('streetAddress', e.target.value)
+          })
+        )
+      ),
+      React.createElement(
+        'div',
+        null,
+        React.createElement(
+          'label',
+          null,
+          'City',
+          React.createElement('span', { className: 'required' }, '*'),
+          ': ',
+          React.createElement('input', {
+            type: 'text',
+            value: profile.city,
+            onChange: e => update('city', e.target.value)
+          })
+        )
+      ),
+      React.createElement(
+        'div',
+        null,
+        React.createElement(
+          'label',
+          null,
+          'State/Province',
+          ': ',
+          React.createElement(
+            'select',
+            { value: profile.state, onChange: e => update('state', e.target.value) },
+            React.createElement('option', { value: '' }, 'Select...'),
+            states.map(s => React.createElement('option', { key: s, value: s }, s))
+          )
+        )
+      ),
+      React.createElement(
+        'div',
+        null,
+        React.createElement(
+          'label',
+          null,
+          'Postal Code',
+          React.createElement('span', { className: 'required' }, '*'),
+          ': ',
+          React.createElement('input', {
+            type: 'text',
+            value: profile.postalCode,
+            onChange: e => update('postalCode', e.target.value)
+          })
+        )
+      ),
+      React.createElement(
+        'div',
+        null,
+        React.createElement(
+          'label',
+          null,
+          'Country',
+          ': ',
+          React.createElement(
+            'select',
+            { value: profile.country, onChange: e => update('country', e.target.value) },
+            countries.map(c => React.createElement('option', { key: c, value: c }, c))
+          )
+        )
+      ),
+      React.createElement(
+        'div',
+        null,
+        React.createElement(
+          'label',
+          null,
+          'Fiscal Year Start Month',
+          React.createElement(HelpIcon, {
+            text: 'Month when your financial reporting year begins.'
+          }),
+          React.createElement('span', { className: 'required' }, '*'),
+          ': ',
+          React.createElement(
+            'select',
+            {
+              value: profile.fiscalYearStartMonth,
+              onChange: e => update('fiscalYearStartMonth', e.target.value)
+            },
+            months.map(m => React.createElement('option', { key: m, value: m }, m))
+          )
+        )
+      ),
+      React.createElement(
+        'div',
+        null,
+        React.createElement(
+          'label',
+          null,
+          'Default Currency',
+          ': ',
+          React.createElement(
+            'select',
+            {
+              value: profile.defaultCurrency,
+              onChange: e => update('defaultCurrency', e.target.value)
+            },
+            currencies.map(c => React.createElement('option', { key: c, value: c }, c))
+          )
+        )
+      ),
+      React.createElement(
+        'div',
+        null,
+        React.createElement(
+          'label',
+          null,
+          'Recharge Unit/Department Name',
+          React.createElement('span', { className: 'required' }, '*'),
+          ': ',
+          React.createElement('input', {
+            type: 'text',
+            value: profile.departmentName,
+            onChange: e => update('departmentName', e.target.value)
+          })
+        )
+      ),
+      React.createElement(
+        'div',
+        null,
+        React.createElement(
+          'label',
+          null,
+          'Cost Center / Chart String',
+          React.createElement(HelpIcon, {
+            text: 'Optional code used by finance to track charges.'
+          }),
+          ': ',
+          React.createElement('input', {
+            type: 'text',
+            value: profile.costCenter,
+            onChange: e => update('costCenter', e.target.value)
+          })
+        )
+      ),
+      React.createElement(
+        'div',
+        null,
+        React.createElement(
+          'label',
+          null,
+          'Notes / Special Instructions: ',
+          React.createElement('textarea', {
+            value: profile.notes,
+            onChange: e => update('notes', e.target.value)
+          })
+        )
       )
     ),
     React.createElement(
       'div',
-      null,
-      React.createElement(
-        'label',
-        null,
-        'Recharge Cost Center / Chart String: ',
-        React.createElement('input', {
-          type: 'text',
-          value: profile.costCenter,
-          onChange: e => update('costCenter', e.target.value)
-        })
-      )
-    ),
-    React.createElement(
-      'div',
-      { style: { marginTop: '1em' } },
+      { className: 'save-cancel-bar' },
       React.createElement('button', { onClick: save }, 'Save'),
+      React.createElement(
+        'button',
+        { onClick: cancel, style: { marginLeft: '0.5em' } },
+        'Cancel'
+      ),
       status && React.createElement('span', { style: { marginLeft: '0.5em' } }, status),
       error &&
         React.createElement(

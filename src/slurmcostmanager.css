@@ -146,6 +146,50 @@ nav button:hover {
   margin-top: 0.5em;
 }
 
+.institution-banner {
+  display: flex;
+  align-items: center;
+  gap: 1em;
+}
+
+.collapsible-panel {
+  border: 1px solid #ccc;
+  margin-top: 1em;
+}
+
+.collapsible-header {
+  background: #f5f5f5;
+  padding: 0.5em;
+  cursor: pointer;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.collapsible-content {
+  padding: 0.5em 1em;
+}
+
+.save-cancel-bar {
+  position: sticky;
+  bottom: 0;
+  background: #fff;
+  padding: 0.5em;
+  border-top: 1px solid #ccc;
+  text-align: right;
+}
+
+.required {
+  color: red;
+  margin-left: 0.25em;
+}
+
+.help-icon {
+  cursor: help;
+  color: #555;
+  margin-left: 0.25em;
+}
+
 @media (max-width: 600px) {
   nav button {
     display: block;
