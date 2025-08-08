@@ -1,12 +1,29 @@
 {
   "institutionName": "",
+  "institutionAbbreviation": "",
+  "campusDivision": "",
+  "institutionType": "",
+  "primaryContact": {
+    "fullName": "",
+    "title": "",
+    "email": "",
+    "phone": ""
+  },
+  "secondaryContact": {
+    "fullName": "",
+    "email": "",
+    "phone": ""
+  },
   "streetAddress": "",
   "city": "",
   "state": "",
   "postalCode": "",
   "country": "",
+  "fiscalYearStartMonth": "",
   "defaultCurrency": "USD",
   "departmentName": "",
   "costCenter": "",
+  "notes": "",
   "logo": ""
 }
+
