@@ -136,6 +136,16 @@ nav button:hover {
   box-sizing: border-box;
 }
 
+.institution-profile div {
+  margin-top: 0.5em;
+}
+
+.institution-logo-preview {
+  max-width: 200px;
+  display: block;
+  margin-top: 0.5em;
+}
+
 @media (max-width: 600px) {
   nav button {
     display: block;

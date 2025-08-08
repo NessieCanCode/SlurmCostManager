@@ -954,6 +954,258 @@ function Details({
 }
 
 
+function InstitutionProfile() {
+  const [profile, setProfile] = useState({
+    institutionName: '',
+    streetAddress: '',
+    city: '',
+    state: '',
+    postalCode: '',
+    country: '',
+    defaultCurrency: 'USD',
+    departmentName: '',
+    costCenter: '',
+    logo: ''
+  });
+  const [status, setStatus] = useState(null);
+  const [error, setError] = useState(null);
+  const baseDir = PLUGIN_BASE;
+
+  useEffect(() => {
+    let cancelled = false;
+    async function load() {
+      try {
+        let text;
+        if (window.cockpit && window.cockpit.file) {
+          text = await window.cockpit.file(`${baseDir}/institution.json`).read();
+        } else {
+          const resp = await fetch('institution.json');
+          if (!resp.ok) throw new Error('Failed to load profile');
+          text = await resp.text();
+        }
+        if (cancelled) return;
+        const json = JSON.parse(text);
+        setProfile(p => ({ ...p, ...json }));
+      } catch (e) {
+        console.error(e);
+      }
+    }
+    load();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  function update(field, value) {
+    setProfile(prev => ({ ...prev, [field]: value }));
+  }
+
+  function handleLogo(e) {
+    const file = e.target.files && e.target.files[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = () => {
+      setProfile(prev => ({ ...prev, logo: reader.result }));
+    };
+    reader.readAsDataURL(file);
+  }
+
+  async function save() {
+    try {
+      setStatus(null);
+      setError(null);
+      const text = JSON.stringify(profile, null, 2);
+      if (window.cockpit && window.cockpit.file) {
+        await window.cockpit.file(`${baseDir}/institution.json`).replace(text);
+      } else {
+        await fetch('institution.json', {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: text
+        });
+      }
+      setStatus('Saved');
+    } catch (e) {
+      console.error(e);
+      setError('Failed to save profile');
+    }
+  }
+
+  return React.createElement(
+    'div',
+    { className: 'institution-profile' },
+    React.createElement('h2', null, 'Institution Profile'),
+    React.createElement(
+      'p',
+      null,
+      "Enter your university's name, contact details, and other key information"
+    ),
+    React.createElement(
+      'div',
+      null,
+      React.createElement(
+        'label',
+        null,
+        'Logo: ',
+        React.createElement('input', {
+          type: 'file',
+          accept: 'image/*',
+          onChange: handleLogo
+        })
+      ),
+      profile.logo &&
+        React.createElement('img', {
+          src: profile.logo,
+          alt: 'Logo',
+          className: 'institution-logo-preview'
+        })
+    ),
+    React.createElement(
+      'div',
+      null,
+      React.createElement(
+        'label',
+        null,
+        'Institution Name: ',
+        React.createElement('input', {
+          type: 'text',
+          value: profile.institutionName,
+          onChange: e => update('institutionName', e.target.value)
+        })
+      )
+    ),
+    React.createElement(
+      'div',
+      null,
+      React.createElement(
+        'label',
+        null,
+        'Street Address: ',
+        React.createElement('input', {
+          type: 'text',
+          value: profile.streetAddress,
+          onChange: e => update('streetAddress', e.target.value)
+        })
+      )
+    ),
+    React.createElement(
+      'div',
+      null,
+      React.createElement(
+        'label',
+        null,
+        'City: ',
+        React.createElement('input', {
+          type: 'text',
+          value: profile.city,
+          onChange: e => update('city', e.target.value)
+        })
+      )
+    ),
+    React.createElement(
+      'div',
+      null,
+      React.createElement(
+        'label',
+        null,
+        'State/Province: ',
+        React.createElement('input', {
+          type: 'text',
+          value: profile.state,
+          onChange: e => update('state', e.target.value)
+        })
+      )
+    ),
+    React.createElement(
+      'div',
+      null,
+      React.createElement(
+        'label',
+        null,
+        'Postal Code: ',
+        React.createElement('input', {
+          type: 'text',
+          value: profile.postalCode,
+          onChange: e => update('postalCode', e.target.value)
+        })
+      )
+    ),
+    React.createElement(
+      'div',
+      null,
+      React.createElement(
+        'label',
+        null,
+        'Country: ',
+        React.createElement('input', {
+          type: 'text',
+          value: profile.country,
+          onChange: e => update('country', e.target.value)
+        })
+      )
+    ),
+    React.createElement(
+      'div',
+      null,
+      React.createElement(
+        'label',
+        null,
+        'Default Currency: ',
+        React.createElement(
+          'select',
+          {
+            value: profile.defaultCurrency,
+            onChange: e => update('defaultCurrency', e.target.value)
+          },
+          ['USD', 'EUR', 'GBP', 'CAD', 'AUD'].map(c =>
+            React.createElement('option', { key: c, value: c }, c)
+          )
+        )
+      )
+    ),
+    React.createElement(
+      'div',
+      null,
+      React.createElement(
+        'label',
+        null,
+        'Recharge Unit/Department Name: ',
+        React.createElement('input', {
+          type: 'text',
+          value: profile.departmentName,
+          onChange: e => update('departmentName', e.target.value)
+        })
+      )
+    ),
+    React.createElement(
+      'div',
+      null,
+      React.createElement(
+        'label',
+        null,
+        'Recharge Cost Center / Chart String: ',
+        React.createElement('input', {
+          type: 'text',
+          value: profile.costCenter,
+          onChange: e => update('costCenter', e.target.value)
+        })
+      )
+    ),
+    React.createElement(
+      'div',
+      { style: { marginTop: '1em' } },
+      React.createElement('button', { onClick: save }, 'Save'),
+      status && React.createElement('span', { style: { marginLeft: '0.5em' } }, status),
+      error &&
+        React.createElement(
+          'span',
+          { className: 'error', style: { marginLeft: '0.5em' } },
+          error
+        )
+    )
+  );
+}
+
 function Rates({ onRatesUpdated }) {
   const [config, setConfig] = useState(null);
   const [overrides, setOverrides] = useState([]);
@@ -1117,6 +1369,7 @@ function Rates({ onRatesUpdated }) {
   return React.createElement(
     'div',
     null,
+    React.createElement(InstitutionProfile, null),
     React.createElement('h2', null, 'Rate Configuration'),
     React.createElement(
       'div',
