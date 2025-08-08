@@ -141,12 +141,12 @@ def generate_invoice(buffer, invoice_data):
     elements.append(table)
     elements.append(Spacer(1, 20))
 
-    elements.append(Paragraph("<b>Payment Instructions</b>", styles["SubHeading"]))
+    elements.append(Paragraph("Payment Instructions", styles["SubHeading"]))
     for line in invoice_data["bank_info"]:
         elements.append(Paragraph(line, styles["Normal"]))
     elements.append(Spacer(1, 20))
 
-    elements.append(Paragraph("<b>Notes</b>", styles["SubHeading"]))
+    elements.append(Paragraph("Notes", styles["SubHeading"]))
     elements.append(Paragraph(invoice_data["notes"], styles["Normal"]))
 
     elements.append(Spacer(1, 20))
