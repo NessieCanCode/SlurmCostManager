@@ -13,12 +13,23 @@ import os
 import sys
 from datetime import datetime
 
-from reportlab.lib import colors
-from reportlab.lib.enums import TA_RIGHT
-from reportlab.lib.pagesizes import LETTER
-from reportlab.lib.styles import ParagraphStyle, getSampleStyleSheet
-from reportlab.platypus import (SimpleDocTemplate, Paragraph, Spacer, Table,
-                                TableStyle)
+# Reportlab is required for PDF generation. If it's missing, emit a clear
+# error message on stderr so callers can surface the failure to users.
+try:
+    from reportlab.lib import colors
+    from reportlab.lib.enums import TA_RIGHT
+    from reportlab.lib.pagesizes import LETTER
+    from reportlab.lib.styles import ParagraphStyle, getSampleStyleSheet
+    from reportlab.platypus import (
+        SimpleDocTemplate,
+        Paragraph,
+        Spacer,
+        Table,
+        TableStyle,
+    )
+except ModuleNotFoundError as exc:  # pragma: no cover - exercised via JS
+    print(str(exc), file=sys.stderr)
+    sys.exit(1)
 
 
 def _load_profile(base_dir):
@@ -174,8 +185,10 @@ def main():
 
     buffer = io.BytesIO()
     generate_invoice(buffer, invoice_data)
-    pdf_bytes = buffer.getvalue()
+    buffer.seek(0)
+    pdf_bytes = buffer.read()
     sys.stdout.write(base64.b64encode(pdf_bytes).decode("ascii"))
+    sys.stdout.flush()
 
 
 if __name__ == "__main__":

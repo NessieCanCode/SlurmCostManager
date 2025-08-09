@@ -905,11 +905,26 @@ function Details({
     };
     try {
       setError(null);
+      if (!filteredDetails.length) {
+        setError('No usage data matches current filters');
+        return;
+      }
       const output = await window.cockpit.spawn(
         ['python3', `${PLUGIN_BASE}/invoice.py`],
         { input: JSON.stringify(invoiceData), err: 'out' }
       );
-      const byteChars = atob(output.trim());
+      const trimmed = output.trim();
+      if (!trimmed) {
+        setError('Invoice generation returned no data');
+        return;
+      }
+      let byteChars;
+      try {
+        byteChars = atob(trimmed);
+      } catch (decodeErr) {
+        setError(trimmed || decodeErr.message || String(decodeErr));
+        return;
+      }
       const byteNumbers = new Array(byteChars.length);
       for (let i = 0; i < byteChars.length; i++) {
         byteNumbers[i] = byteChars.charCodeAt(i);
