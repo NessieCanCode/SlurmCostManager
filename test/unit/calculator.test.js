@@ -1,7 +1,13 @@
 const assert = require('assert');
 const fs = require('fs');
 const path = require('path');
-const { calculateCharges, loadRatesConfig } = require('../../src/cost-calculator');
+const {
+  calculateCharges,
+  loadRatesConfig,
+  normalizeRecord,
+  applyRates,
+  accumulateCharge,
+} = require('../../src/cost-calculator');
 
 async function testFileConfig() {
   const usage = [
@@ -17,6 +23,45 @@ async function testFileConfig() {
   assert.strictEqual(charges['2024-02'].special.cost, (100 * 0.025 + 20 * 0.25) * 0.9);
   assert.strictEqual(charges['2024-02'].other.cost, 10 * 0.02);
   assert.strictEqual(charges['2024-01'].education.gpu_hours, 10);
+}
+
+function testNormalizeRecord() {
+  const rec = normalizeRecord({
+    account: 'acct',
+    date: '2024-03-15',
+    core_hours: 5,
+    gpu_hours: 2,
+  });
+  assert.deepStrictEqual(rec, {
+    account: 'acct',
+    month: '2024-03',
+    coreHours: 5,
+    gpuHours: 2,
+  });
+  assert.strictEqual(normalizeRecord({ core_hours: -1, gpu_hours: 0 }), null);
+}
+
+function testApplyRates() {
+  const ctx = {
+    defaultRate: 0.02,
+    defaultGpuRate: 0.2,
+    historicalRates: { '2024-03': 0.03 },
+    historicalGpuRates: { '2024-03': 0.3 },
+    overrides: { acct: { discount: 0.25 } },
+  };
+  const rec = { account: 'acct', month: '2024-03', coreHours: 100, gpuHours: 10 };
+  const res = applyRates(rec, ctx);
+  assert.strictEqual(res.cost, (100 * 0.03 + 10 * 0.3) * 0.75);
+}
+
+function testAccumulateCharge() {
+  const charges = {};
+  const rec = { account: 'acct', month: '2024-03', coreHours: 1, gpuHours: 2, cost: 3 };
+  accumulateCharge(charges, rec);
+  accumulateCharge(charges, rec);
+  assert.deepStrictEqual(charges, {
+    '2024-03': { acct: { core_hours: 2, gpu_hours: 4, cost: 6 } },
+  });
 }
 
 function testPassedConfig() {
@@ -103,6 +148,9 @@ function testRoundingTotals() {
 }
 
 async function run() {
+  testNormalizeRecord();
+  testApplyRates();
+  testAccumulateCharge();
   await testFileConfig();
   testPassedConfig();
   testInvalidUsageIgnored();

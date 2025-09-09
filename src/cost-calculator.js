@@ -34,6 +34,84 @@ async function loadRatesConfig() {
 }
 
 /**
+ * Normalize a usage record.
+ *
+ * @param {Object} record - Raw usage record
+ * @returns {Object|null} normalized record or null if invalid
+ */
+function normalizeRecord(record) {
+  if (!record) {
+    return null;
+  }
+  const account = record.account || 'unknown';
+  const month = (record.date || '').slice(0, 7); // YYYY-MM
+  const coreHours =
+    typeof record.core_hours === 'number' && record.core_hours > 0
+      ? record.core_hours
+      : 0;
+  const gpuHours =
+    typeof record.gpu_hours === 'number' && record.gpu_hours > 0
+      ? record.gpu_hours
+      : 0;
+  if (coreHours <= 0 && gpuHours <= 0) {
+    return null;
+  }
+  return { account, month, coreHours, gpuHours };
+}
+
+/**
+ * Apply rates, overrides, and discounts to a normalized record.
+ *
+ * @param {Object} record - Normalized record
+ * @param {Object} ctx - Rate context
+ * @returns {Object} record with cost
+ */
+function applyRates(record, ctx) {
+  const { account, month, coreHours, gpuHours } = record;
+  const ovr = ctx.overrides[account] || {};
+  const rate =
+    typeof ovr.rate === 'number'
+      ? ovr.rate
+      : typeof ctx.historicalRates[month] === 'number'
+        ? ctx.historicalRates[month]
+        : ctx.defaultRate;
+  const gpuRate =
+    typeof ovr.gpuRate === 'number'
+      ? ovr.gpuRate
+      : typeof ctx.historicalGpuRates[month] === 'number'
+        ? ctx.historicalGpuRates[month]
+        : ctx.defaultGpuRate;
+  const validRate = rate > 0 ? rate : 0;
+  const validGpuRate = gpuRate > 0 ? gpuRate : 0;
+  let cost = coreHours * validRate + gpuHours * validGpuRate;
+  const rawDiscount = typeof ovr.discount === 'number' ? ovr.discount : 0;
+  const discount = Math.min(1, Math.max(0, rawDiscount));
+  if (discount > 0) {
+    cost *= 1 - discount;
+  }
+  return { account, month, coreHours, gpuHours, cost };
+}
+
+/**
+ * Accumulate a record's cost into the charges object.
+ *
+ * @param {Object} charges - Accumulator
+ * @param {Object} record - Record with cost
+ * @returns {Object} updated charges
+ */
+function accumulateCharge(charges, record) {
+  const { account, month, coreHours, gpuHours, cost } = record;
+  if (!charges[month]) charges[month] = {};
+  if (!charges[month][account]) {
+    charges[month][account] = { core_hours: 0, gpu_hours: 0, cost: 0 };
+  }
+  charges[month][account].core_hours += coreHours;
+  charges[month][account].gpu_hours += gpuHours;
+  charges[month][account].cost += cost;
+  return charges;
+}
+
+/**
  * Calculate charges from usage records applying rates and overrides.
  *
  * @param {Array} usage - Array of {account, date, core_hours, gpu_hours}
@@ -45,55 +123,28 @@ function calculateCharges(usage, config) {
   if (!config) {
     throw new Error('rate configuration required');
   }
-  const defaultRate =
-    typeof config.defaultRate === 'number' && config.defaultRate > 0
-      ? config.defaultRate
-      : 0;
-  const defaultGpuRate =
-    typeof config.defaultGpuRate === 'number' && config.defaultGpuRate > 0
-      ? config.defaultGpuRate
-      : 0;
-  const historical = config.historicalRates || {};
-  const gpuHistorical = config.historicalGpuRates || {};
-  const overrides = config.overrides || {};
+  const ctx = {
+    defaultRate:
+      typeof config.defaultRate === 'number' && config.defaultRate > 0
+        ? config.defaultRate
+        : 0,
+    defaultGpuRate:
+      typeof config.defaultGpuRate === 'number' && config.defaultGpuRate > 0
+        ? config.defaultGpuRate
+        : 0,
+    historicalRates: config.historicalRates || {},
+    historicalGpuRates: config.historicalGpuRates || {},
+    overrides: config.overrides || {},
+  };
 
-  const charges = {};
-
-  for (const record of usage) {
-    if (!record) {
-      continue;
+  const charges = usage.reduce((acc, rec) => {
+    const normalized = normalizeRecord(rec);
+    if (!normalized) {
+      return acc;
     }
-    const account = record.account || 'unknown';
-    const month = (record.date || '').slice(0, 7); // YYYY-MM
-    const ovr = overrides[account] || {};
-    const coreHours = typeof record.core_hours === 'number' && record.core_hours > 0 ? record.core_hours : 0;
-    const gpuHours = typeof record.gpu_hours === 'number' && record.gpu_hours > 0 ? record.gpu_hours : 0;
-    if (coreHours <= 0 && gpuHours <= 0) {
-      continue;
-    }
-    const rate = typeof ovr.rate === 'number'
-      ? ovr.rate
-      : (typeof historical[month] === 'number' ? historical[month] : defaultRate);
-    const gpuRate = typeof ovr.gpuRate === 'number'
-      ? ovr.gpuRate
-      : (typeof gpuHistorical[month] === 'number' ? gpuHistorical[month] : defaultGpuRate);
-    const validRate = rate > 0 ? rate : 0;
-    const validGpuRate = gpuRate > 0 ? gpuRate : 0;
-    let cost = coreHours * validRate + gpuHours * validGpuRate;
-    const rawDiscount = typeof ovr.discount === 'number' ? ovr.discount : 0;
-    const discount = Math.min(1, Math.max(0, rawDiscount));
-    if (discount > 0) {
-      cost *= (1 - discount);
-    }
-
-    if (!charges[month]) charges[month] = {};
-    if (!charges[month][account]) {
-      charges[month][account] = { core_hours: 0, gpu_hours: 0, cost: 0 };
-    }
-    charges[month][account].core_hours += coreHours;
-    charges[month][account].gpu_hours += gpuHours;
-    charges[month][account].cost += cost;
-  }
+    const costed = applyRates(normalized, ctx);
+    return accumulateCharge(acc, costed);
+  }, {});
 
   for (const month of Object.keys(charges)) {
     for (const account of Object.keys(charges[month])) {
@@ -110,4 +161,7 @@ function calculateCharges(usage, config) {
 module.exports = {
   calculateCharges,
   loadRatesConfig,
+  normalizeRecord,
+  applyRates,
+  accumulateCharge,
 };
