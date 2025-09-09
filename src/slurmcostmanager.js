@@ -12,6 +12,9 @@ const PLUGIN_BASE =
     window.cockpit.manifest.path) ||
   '/usr/share/cockpit/slurmcostmanager';
 
+const HAS_COCKPIT =
+  typeof window !== 'undefined' && window.cockpit && window.cockpit.spawn;
+
 function getBillingPeriod(ref = new Date()) {
   const today = new Date();
   let year, month, end;
@@ -50,19 +53,19 @@ function getYearPeriod(year = new Date().getFullYear()) {
 function useBillingData(period) {
   const [data, setData] = useState(null);
   const [error, setError] = useState(null);
-  const requestIdRef = useRef(0);
+  const [loading, setLoading] = useState(false);
+  const abortRef = useRef(null);
 
   const load = useCallback(async () => {
-    const id = ++requestIdRef.current;
-    // Clear out existing data while loading a new period so that views
-    // such as "Detailed Transactions" don't momentarily display data
-    // from the previously selected period (e.g. the fiscal year) when
-    // navigating directly between views.
-    setData(null);
+    if (abortRef.current) {
+      if (abortRef.current.abort) abortRef.current.abort();
+      if (abortRef.current.close) abortRef.current.close();
+    }
+    setLoading(true);
     setError(null);
     try {
       let json;
-      if (window.cockpit && window.cockpit.spawn) {
+      if (HAS_COCKPIT) {
         let start, end;
         if (typeof period === 'string') {
           ({ start, end } = getBillingPeriod(period));
@@ -81,30 +84,39 @@ function useBillingData(period) {
           '--output',
           '-',
         ];
-        const output = await window.cockpit.spawn(args, { err: 'message' });
+        const proc = window.cockpit.spawn(args, { err: 'message' });
+        abortRef.current = proc;
+        const output = await proc;
         json = JSON.parse(output);
       } else {
-        const resp = await fetch('billing.json');
+        const controller = new AbortController();
+        abortRef.current = controller;
+        const resp = await fetch('billing.json', { signal: controller.signal });
         if (!resp.ok) throw new Error('Failed to fetch billing data');
         json = await resp.json();
       }
-      if (requestIdRef.current === id) {
-        setData(json);
-        setError(null);
-      }
+      setData(json);
     } catch (e) {
-      console.error(e);
-      if (requestIdRef.current === id) {
+      if (e.name !== 'AbortError') {
+        console.error(e);
         setError(e.message || String(e));
       }
+    } finally {
+      setLoading(false);
     }
   }, [period]);
 
   useEffect(() => {
     load();
+    return () => {
+      if (abortRef.current) {
+        if (abortRef.current.abort) abortRef.current.abort();
+        if (abortRef.current.close) abortRef.current.close();
+      }
+    };
   }, [load]);
 
-  return { data, error, reload: load };
+  return { data, error, loading, reload: load };
 }
 
 function aggregateAccountDetails(details = []) {
@@ -1928,7 +1940,7 @@ function App() {
   const [month, setMonth] = useState(defaultMonth);
   const yearPeriod = useMemo(() => getYearPeriod(currentYear), [currentYear]);
   const period = view === 'year' ? yearPeriod : month;
-  const { data, error, reload } = useBillingData(period);
+  const { data, error, loading, reload } = useBillingData(period);
   const details = useMemo(() => {
     if (!data) return [];
     return view === 'year'
@@ -1985,7 +1997,7 @@ function App() {
           )
         )
       ),
-    view !== 'settings' && !data && !error && React.createElement('p', null, 'Loading...'),
+    view !== 'settings' && loading && React.createElement('p', null, 'Loading...'),
     view !== 'settings' &&
       error &&
       React.createElement(
