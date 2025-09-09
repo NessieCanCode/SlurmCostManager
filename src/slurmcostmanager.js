@@ -923,7 +923,10 @@ function Details({
       }
       const output = await window.cockpit.spawn(
         ['python3', `${PLUGIN_BASE}/invoice.py`],
-        { input: JSON.stringify(invoiceData), err: 'out' }
+        // Capture stderr as the error message so problems like missing
+        // Python dependencies surface to the user instead of a generic
+        // "python3 exited with code 1" message.
+        { input: JSON.stringify(invoiceData), err: 'message' }
       );
       const trimmed = output.trim();
       if (!trimmed) {
