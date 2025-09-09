@@ -43,9 +43,10 @@ def _load_profile(base_dir):
         return {}
     except json.JSONDecodeError as exc:
         logging.error("Failed to parse %s: %s", path, exc)
+        raise
     except OSError as exc:
         logging.error("Unable to read %s: %s", path, exc)
-    return {}
+        raise
 
 
 def _profile_sections(profile):
@@ -198,7 +199,15 @@ def generate_invoice(buffer, invoice_data):
 
 def main():
     base_dir = os.path.dirname(os.path.abspath(__file__))
-    profile = _load_profile(base_dir)
+    try:
+        profile = _load_profile(base_dir)
+    except json.JSONDecodeError as exc:
+        print(f"Invalid institution profile: {exc}", file=sys.stderr)
+        sys.exit(1)
+    except OSError as exc:
+        print(f"Unable to read institution profile: {exc}", file=sys.stderr)
+        sys.exit(1)
+
     invoice_data = json.load(sys.stdin)
 
     # Fill in profile-based sections if not provided
