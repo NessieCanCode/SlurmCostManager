@@ -11,6 +11,7 @@ import io
 import json
 import os
 import sys
+import logging
 from datetime import datetime
 
 # Reportlab is required for PDF generation. If it's missing, emit a clear
@@ -38,8 +39,13 @@ def _load_profile(base_dir):
     try:
         with open(path, "r", encoding="utf-8") as fh:
             return json.load(fh)
-    except Exception:
+    except FileNotFoundError:
         return {}
+    except json.JSONDecodeError as exc:
+        logging.error("Failed to parse %s: %s", path, exc)
+    except OSError as exc:
+        logging.error("Unable to read %s: %s", path, exc)
+    return {}
 
 
 def _profile_sections(profile):

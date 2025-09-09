@@ -11,3 +11,4 @@ PYTHONPATH=src python test/unit/billing_summary.test.py
 PYTHONPATH=src python test/unit/invoice_retrieval.test.py
 PYTHONPATH=src python test/unit/auth_boundaries.test.py
 PYTHONPATH=src python test/unit/accounts_listing.test.py
+PYTHONPATH=src python test/unit/profile_loading.test.py
