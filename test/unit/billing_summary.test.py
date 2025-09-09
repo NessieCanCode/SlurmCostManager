@@ -21,18 +21,22 @@ class BillingSummaryTests(unittest.TestCase):
         with mock.patch.object(
             SlurmDB,
             'aggregate_usage',
-            return_value=(usage, {
-                'daily': {},
-                'monthly': {},
-                'yearly': {},
-                'daily_gpu': {},
-                'monthly_gpu': {},
-                'yearly_gpu': {},
-            }),
+            return_value=(
+                usage,
+                {
+                    'daily': {},
+                    'monthly': {},
+                    'yearly': {},
+                    'daily_gpu': {},
+                    'monthly_gpu': {},
+                    'yearly_gpu': {},
+                },
+            ),
+        ), mock.patch.object(SlurmDB, 'fetch_invoices', return_value=invoices), mock.patch.object(
+            SlurmDB, 'cluster_resources', return_value={'cores': 100}
         ):
-            with mock.patch.object(SlurmDB, 'fetch_invoices', return_value=invoices):
-                db = SlurmDB()
-                summary = db.export_summary('2023-10-01', '2023-10-31')
+            db = SlurmDB()
+            summary = db.export_summary('2023-10-01', '2023-10-31')
         self.assertEqual(summary['summary']['total'], 1.2)
         self.assertEqual(summary['details'][0]['account'], 'acct')
         self.assertEqual(summary['details'][0]['core_hours'], 10.0)
@@ -62,7 +66,9 @@ class BillingSummaryTests(unittest.TestCase):
             SlurmDB,
             'aggregate_usage',
             return_value=(usage, {'daily': {}, 'monthly': {}, 'yearly': {}}),
-        ), mock.patch.object(SlurmDB, 'fetch_invoices', return_value=[]):
+        ), mock.patch.object(SlurmDB, 'fetch_invoices', return_value=[]), mock.patch.object(
+            SlurmDB, 'cluster_resources', return_value={'cores': 100}
+        ):
             db = SlurmDB()
             summary = db.export_summary('2024-02-01', '2024-02-29')
         costs = {d['account']: d['cost'] for d in summary['details']}
@@ -101,7 +107,9 @@ class BillingSummaryTests(unittest.TestCase):
             SlurmDB,
             'aggregate_usage',
             return_value=(usage, {'daily': {}, 'monthly': {}, 'yearly': {}}),
-        ), mock.patch.object(SlurmDB, 'fetch_invoices', return_value=[]):
+        ), mock.patch.object(SlurmDB, 'fetch_invoices', return_value=[]), mock.patch.object(
+            SlurmDB, 'cluster_resources', return_value={'cores': 100}
+        ):
             db = SlurmDB()
             summary = db.export_summary('2024-03-01', '2024-03-31')
         job = summary['details'][0]['users'][0]['jobs'][0]
@@ -133,6 +141,8 @@ class BillingSummaryTests(unittest.TestCase):
             return_value=(usage, {'daily': {}, 'monthly': {}, 'yearly': {}}),
         ), mock.patch.object(SlurmDB, 'fetch_invoices', return_value=[]), mock.patch(
             'builtins.open', side_effect=fake_open
+        ), mock.patch.object(
+            SlurmDB, 'cluster_resources', return_value={'cores': 100}
         ):
             db = SlurmDB()
             with self.assertRaises(ValueError):
@@ -157,6 +167,8 @@ class BillingSummaryTests(unittest.TestCase):
             return_value=(usage, {'daily': {}, 'monthly': {}, 'yearly': {}}),
         ), mock.patch.object(SlurmDB, 'fetch_invoices', return_value=[]), mock.patch(
             'builtins.open', side_effect=fake_open
+        ), mock.patch.object(
+            SlurmDB, 'cluster_resources', return_value={'cores': 100}
         ):
             db = SlurmDB()
             with self.assertRaises(ValueError):
@@ -181,6 +193,25 @@ class BillingSummaryTests(unittest.TestCase):
             return_value=(usage, {'daily': {}, 'monthly': {}, 'yearly': {}}),
         ), mock.patch.object(SlurmDB, 'fetch_invoices', return_value=[]), mock.patch(
             'builtins.open', side_effect=fake_open
+        ), mock.patch.object(
+            SlurmDB, 'cluster_resources', return_value={'cores': 100}
+        ):
+            db = SlurmDB()
+            with self.assertRaises(ValueError):
+                db.export_summary('2023-10-01', '2023-10-31')
+
+    def test_export_summary_invalid_cluster_cores(self):
+        usage = {
+            '2023-10': {
+                'acct': {'core_hours': 10.0, 'users': {}}
+            }
+        }
+        with mock.patch.object(
+            SlurmDB,
+            'aggregate_usage',
+            return_value=(usage, {'daily': {}, 'monthly': {}, 'yearly': {}}),
+        ), mock.patch.object(SlurmDB, 'fetch_invoices', return_value=[]), mock.patch.object(
+            SlurmDB, 'cluster_resources', return_value={'cores': 0}
         ):
             db = SlurmDB()
             with self.assertRaises(ValueError):
@@ -207,15 +238,7 @@ class BillingSummaryTests(unittest.TestCase):
         ), mock.patch.object(SlurmDB, 'fetch_invoices', return_value=[]), mock.patch(
             'builtins.open', side_effect=fake_open
         ), mock.patch.object(
-            SlurmDB,
-            '_parse_slurm_conf',
-            return_value={
-                'nodes': 1,
-                'sockets': 1,
-                'cores': 100,
-                'threads': 1,
-                'gres': {},
-            },
+            SlurmDB, 'cluster_resources', return_value={'cores': 100}
         ):
             db = SlurmDB()
             summary = db.export_summary('2024-02-01', '2024-02-29')
