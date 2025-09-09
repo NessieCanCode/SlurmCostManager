@@ -1,26 +1,33 @@
 'use strict';
 
-const fs = require('fs');
+const fs = require('fs').promises;
 const path = require('path');
 
 /**
  * Load rate configuration from rates.json.
  *
- * @returns {Object} rate configuration
+ * @returns {Promise<Object>} rate configuration
  */
-function loadRatesConfig() {
+async function loadRatesConfig() {
   const cfgPath = path.join(__dirname, 'rates.json');
   try {
-    const data = fs.readFileSync(cfgPath, 'utf8');
+    const data = await fs.readFile(cfgPath, 'utf8');
     return JSON.parse(data);
   } catch (e) {
     if (e.code === 'ENOENT') {
       return {};
     }
     if (e instanceof SyntaxError) {
-      console.error(`Invalid JSON in rate configuration: ${e.message}`);
+      console.error('Invalid JSON in rate configuration', {
+        path: cfgPath,
+        error: e.message,
+      });
     } else {
-      console.error(`Error loading rate configuration: ${e.message}`);
+      console.error('Error loading rate configuration', {
+        path: cfgPath,
+        error: e.message,
+        code: e.code,
+      });
     }
     throw e;
   }
