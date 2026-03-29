@@ -793,7 +793,8 @@ function Details({
   users = [],
   month,
   onMonthChange,
-  monthOptions = []
+  monthOptions = [],
+  institutionProfile = {}
 }) {
   const [expanded, setExpanded] = useState(null);
   const [filters, setFilters] = useState({
@@ -858,7 +859,14 @@ function Details({
         });
       });
     });
-    const csv = rows.map(r => r.join(',')).join('\n');
+    function csvQuote(field) {
+      const s = String(field);
+      if (s.includes(',') || s.includes('"') || s.includes('\n')) {
+        return '"' + s.replace(/"/g, '""') + '"';
+      }
+      return s;
+    }
+    const csv = rows.map(r => r.map(csvQuote).join(',')).join('\n');
     const blob = new Blob([csv], { type: 'text/csv' });
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
@@ -906,12 +914,9 @@ function Details({
       subtotal: totals.cost,
       tax: 0,
       total_due: totals.cost,
-      bank_info: [
-        'Bank Name: University Bank',
-        'Account Number: 123456789',
-        'Routing Number: 987654321',
-        `Reference: INV-${Date.now()}`
-      ],
+      bank_info: institutionProfile.bankInfo && institutionProfile.bankInfo.trim()
+        ? institutionProfile.bankInfo.split('\n').map(l => l.trim()).filter(Boolean)
+        : ['(Bank information not configured — update Institution Profile)'],
       notes:
         'Thank you for your prompt payment. For questions regarding this invoice, please contact our office.'
     };
@@ -1093,6 +1098,7 @@ function InstitutionProfile() {
     defaultCurrency: 'USD',
     departmentName: '',
     costCenter: '',
+    bankInfo: '',
     notes: '',
     logo: ''
   });
@@ -1632,6 +1638,25 @@ function InstitutionProfile() {
         React.createElement(
           'label',
           null,
+          'Bank / Payment Details',
+          React.createElement(HelpIcon, {
+            text: 'Enter bank details line-by-line (e.g. Bank Name, Account Number, Routing Number). These lines will appear on exported invoices.'
+          }),
+          ': ',
+          React.createElement('textarea', {
+            value: profile.bankInfo,
+            rows: 4,
+            placeholder: 'Bank Name: ...\nAccount Number: ...\nRouting Number: ...',
+            onChange: e => update('bankInfo', e.target.value)
+          })
+        )
+      ),
+      React.createElement(
+        'div',
+        null,
+        React.createElement(
+          'label',
+          null,
           'Notes / Special Instructions: ',
           React.createElement('textarea', {
             value: profile.notes,
@@ -1662,6 +1687,7 @@ function InstitutionProfile() {
 
 function Rates({ onRatesUpdated }) {
   const [config, setConfig] = useState(null);
+  const [originalConfig, setOriginalConfig] = useState(null);
   const [overrides, setOverrides] = useState([]);
   const [accounts, setAccounts] = useState([]);
   const [error, setError] = useState(null);
@@ -1683,13 +1709,16 @@ function Rates({ onRatesUpdated }) {
         }
         if (cancelled) return;
         const json = JSON.parse(text);
+        setOriginalConfig(json);
         setConfig({
-          defaultRate: json.defaultRate
+          defaultRate: json.defaultRate ?? '',
+          defaultGpuRate: json.defaultGpuRate ?? ''
         });
         const ovrs = json.overrides
           ? Object.entries(json.overrides).map(([account, cfg]) => ({
               account,
               rate: cfg.rate ?? '',
+              gpuRate: cfg.gpuRate ?? '',
               discount: cfg.discount != null ? cfg.discount * 100 : ''
             }))
           : [];
@@ -1743,7 +1772,7 @@ function Rates({ onRatesUpdated }) {
   }
 
   function addOverride() {
-    setOverrides(prev => [...prev, { account: '', rate: '', discount: '' }]);
+    setOverrides(prev => [...prev, { account: '', rate: '', gpuRate: '', discount: '' }]);
   }
 
   function removeOverride(index) {
@@ -1763,8 +1792,17 @@ function Rates({ onRatesUpdated }) {
         return;
       }
 
-      const json = { defaultRate };
+      // Start from the original loaded config so fields not shown in the UI
+      // (e.g. historicalRates, historicalGpuRates) are preserved on save.
+      const json = Object.assign({}, originalConfig || {}, { defaultRate });
 
+      const defaultGpuRate = parseFloat(config.defaultGpuRate);
+      if (Number.isFinite(defaultGpuRate)) {
+        json.defaultGpuRate = defaultGpuRate;
+      } else if (config.defaultGpuRate === '' && 'defaultGpuRate' in json) {
+        // If the field was cleared, remove it so the backend uses its default
+        delete json.defaultGpuRate;
+      }
 
       if (overrides.length) {
         const overridesJson = {};
@@ -1777,6 +1815,14 @@ function Rates({ onRatesUpdated }) {
               entry.rate = rate;
             } else {
               console.warn(`Ignoring invalid rate for account ${o.account}:`, o.rate);
+            }
+          }
+          if (o.gpuRate !== '') {
+            const gpuRate = parseFloat(o.gpuRate);
+            if (Number.isFinite(gpuRate)) {
+              entry.gpuRate = gpuRate;
+            } else {
+              console.warn(`Ignoring invalid GPU rate for account ${o.account}:`, o.gpuRate);
             }
           }
           if (o.discount !== '') {
@@ -1792,8 +1838,10 @@ function Rates({ onRatesUpdated }) {
           }
           if (Object.keys(entry).length) overridesJson[o.account] = entry;
         });
-        if (Object.keys(overridesJson).length)
-          json.overrides = overridesJson;
+        json.overrides = Object.keys(overridesJson).length ? overridesJson : undefined;
+        if (json.overrides === undefined) delete json.overrides;
+      } else {
+        delete json.overrides;
       }
 
       const text = JSON.stringify(json, null, 2);
@@ -1831,13 +1879,29 @@ function Rates({ onRatesUpdated }) {
       React.createElement(
         'label',
         null,
-        'Default Rate ($/core-hour): ',
+        'Default CPU Rate ($/core-hour): ',
         React.createElement('input', {
           type: 'number',
           step: '0.001',
           value: config.defaultRate,
           onChange: e =>
             setConfig({ ...config, defaultRate: e.target.value })
+        })
+      )
+    ),
+    React.createElement(
+      'div',
+      { style: { marginTop: '0.5em' } },
+      React.createElement(
+        'label',
+        null,
+        'Default GPU Rate ($/GPU-hour): ',
+        React.createElement('input', {
+          type: 'number',
+          step: '0.001',
+          value: config.defaultGpuRate,
+          onChange: e =>
+            setConfig({ ...config, defaultGpuRate: e.target.value })
         })
       )
     ),
@@ -1852,7 +1916,8 @@ function Rates({ onRatesUpdated }) {
           'tr',
           null,
           React.createElement('th', null, 'Account'),
-          React.createElement('th', null, 'Rate'),
+          React.createElement('th', null, 'CPU Rate ($/core-hr)'),
+          React.createElement('th', null, 'GPU Rate ($/GPU-hr)'),
           React.createElement('th', null, 'Discount (%)'),
           React.createElement('th', null)
         )
@@ -1888,6 +1953,15 @@ function Rates({ onRatesUpdated }) {
                 value: o.rate,
                 onChange: e =>
                   updateOverride(idx, 'rate', e.target.value)
+              })
+            ),
+            React.createElement('td', null,
+              React.createElement('input', {
+                type: 'number',
+                step: '0.001',
+                value: o.gpuRate,
+                onChange: e =>
+                  updateOverride(idx, 'gpuRate', e.target.value)
               })
             ),
             React.createElement('td', null,
@@ -1929,6 +2003,29 @@ function Rates({ onRatesUpdated }) {
   );
 }
 
+function useInstitutionProfile() {
+  const [profile, setProfile] = useState({});
+  useEffect(() => {
+    async function load() {
+      try {
+        let text;
+        if (window.cockpit && window.cockpit.file) {
+          text = await window.cockpit.file(`${PLUGIN_BASE}/institution.json`).read();
+        } else {
+          const resp = await fetch('institution.json');
+          if (!resp.ok) return;
+          text = await resp.text();
+        }
+        setProfile(JSON.parse(text));
+      } catch (e) {
+        console.error('Failed to load institution profile:', e);
+      }
+    }
+    load();
+  }, []);
+  return profile;
+}
+
 function App() {
   const [view, setView] = useState('year');
   const now = new Date();
@@ -1941,6 +2038,7 @@ function App() {
   const yearPeriod = useMemo(() => getYearPeriod(currentYear), [currentYear]);
   const period = view === 'year' ? yearPeriod : month;
   const { data, error, loading, reload } = useBillingData(period);
+  const institutionProfile = useInstitutionProfile();
   const details = useMemo(() => {
     if (!data) return [];
     return view === 'year'
@@ -2048,7 +2146,8 @@ function App() {
         users: data.users,
         month,
         onMonthChange: setMonth,
-        monthOptions
+        monthOptions,
+        institutionProfile
       }),
     view === 'settings' && React.createElement(Rates, { onRatesUpdated: reload })
   );

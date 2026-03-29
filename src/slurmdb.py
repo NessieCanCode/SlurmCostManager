@@ -29,7 +29,7 @@ except AttributeError:  # pragma: no cover - executed on Python < 3.7
                 continue
         raise ValueError(f"Invalid isoformat string: {value!r}")
 
-STATE_FILE = os.path.expanduser("last_run.json")
+STATE_FILE = os.path.join(os.path.expanduser("~"), ".local", "share", "slurmledger", "last_run.json")
 
 JOB_STATE_MAP = {
     0: "PENDING",
@@ -509,13 +509,15 @@ class SlurmDB:
             acct_entry['core_hours'] += cpus * dur_hours
             acct_entry['gpu_hours'] += gpus * dur_hours
             user_entry = acct_entry['users'].setdefault(
-                user, {'core_hours': 0.0, 'jobs': {}}
+                user, {'core_hours': 0.0, 'gpu_hours': 0.0, 'jobs': {}}
             )
             user_entry['core_hours'] += cpus * dur_hours
+            user_entry['gpu_hours'] += gpus * dur_hours
             job_entry = user_entry['jobs'].setdefault(
                 job,
                 {
                     'core_hours': 0.0,
+                    'gpu_hours': 0.0,
                     'job_name': row.get('job_name'),
                     'partition': partition,
                     'start': start.isoformat(),
@@ -527,6 +529,7 @@ class SlurmDB:
                 },
             )
             job_entry['core_hours'] += cpus * dur_hours
+            job_entry['gpu_hours'] += gpus * dur_hours
         return agg, totals
 
     def fetch_all_accounts(self):
@@ -644,12 +647,12 @@ class SlurmDB:
                     acct_cost *= 1 - discount
                 users: List[Dict[str, Any]] = []
                 for user, uvals in vals.get('users', {}).items():
-                    u_cost = uvals['core_hours'] * rate
+                    u_cost = uvals['core_hours'] * rate + uvals.get('gpu_hours', 0.0) * gpu_rate
                     if 0 < discount < 1:
                         u_cost *= 1 - discount
                     jobs: List[Dict[str, Any]] = []
                     for job, jvals in uvals.get('jobs', {}).items():
-                        j_cost = jvals['core_hours'] * rate
+                        j_cost = jvals['core_hours'] * rate + jvals.get('gpu_hours', 0.0) * gpu_rate
                         if 0 < discount < 1:
                             j_cost *= 1 - discount
                         jobs.append(

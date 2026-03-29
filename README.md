@@ -1,8 +1,8 @@
-# SlurmCostManager
+# SlurmLedger
 
-**SlurmCostManager** is a Cockpit plugin that integrates seamlessly into the Cockpit UI on Linux servers. It provides interactive billing analytics and invoice management for HPC environments using **Slurm** and SlurmDBD.
+**SlurmLedger** is a Cockpit plugin that integrates seamlessly into the Cockpit UI on Linux servers. It provides interactive billing analytics and invoice management for HPC environments using **Slurm** and SlurmDBD.
 
-This repository now includes a responsive Cockpit UI built with React.  The interface pulls live billing data from SlurmDBD using a bundled Python helper and offers summary, detail and invoice views with a built‑in PDF viewer.
+This repository includes a responsive Cockpit UI built with React. The interface pulls live billing data from SlurmDBD using a bundled Python helper and offers summary, detail and invoice views with a built‑in PDF viewer.
 
 ## ✅ Features
 
@@ -19,7 +19,7 @@ This repository now includes a responsive Cockpit UI built with React.  The inte
 ## 📁 Project Structure
 
 ```text
-SlurmCostManager/
+SlurmLedger/
 ├── src/                                   # Source UI code built with React or modern JS
 │   ├── invoices/                          # Stored invoice PDFs
 │   ├── invoice-schema.json                # Invoice metadata schema
@@ -55,12 +55,12 @@ make rpm  # writes an RPM to rpmbuild/RPMS/
 make deb  # creates slurmcostmanager_<version>_all.deb
 ```
 
-Both targets generate `org.cockpit_project.slurmcostmanager.metainfo.xml` and bundle the existing `manifest.json` so the packages can be installed on RPM or DEB based systems.
+Both targets generate `org.cockpit_project.slurmcostmanager.metainfo.xml` and bundle `manifest.json` so the packages can be installed on RPM or DEB based systems.
 
 ### Manual verification
 
 1. Run `make devel-install` and confirm that `~/.local/share/cockpit/slurmcostmanager` is a symlink.
-2. Open Cockpit at `https://<host>:9090` and verify the **SlurmCostManager** entry appears.
+2. Open Cockpit at `https://<host>:9090` and verify the **SlurmLedger** entry appears.
 3. When done developing, execute `make devel-uninstall` to remove the symlink.
 
 ## 🧭 Versioning and Releases
@@ -78,7 +78,7 @@ The workflow tags the repository, builds packages, and publishes artifacts to Gi
 
 1. On a Linux host with **Cockpit** installed (e.g. CentOS, Fedora, Debian compatible).
 2. After `make devel-install`, open your browser to `https://<host>:9090`.
-3. Locate **SlurmCostManager** in the sidebar menu.
+3. Locate **SlurmLedger** in the sidebar menu.
 4. Interact with billing summaries, drill-ins, invoice retrieval, and configure rates directly within Cockpit.
 
 ### Fetching real Slurm usage
@@ -107,7 +107,7 @@ frontend and can be used for local development or offline snapshots.
 #### Automatic daily exports
 
 To export usage one day at a time, the helper can remember the last processed
-date in `~/.slurm-cost-manager/last_run.json`. Running with `--auto-daily`
+date in `~/.local/share/slurmledger/last_run.json`. Running with `--auto-daily`
 without `--start`/`--end` processes the next unexported day and writes a JSON
 file per day into the chosen directory:
 
@@ -157,4 +157,4 @@ We welcome community contributions. Please see [CONTRIBUTING.md](CONTRIBUTING.md
 
 ## 📄 License
 
-**SlurmCostManager** is licensed under **MIT**—see the [LICENSE](LICENSE) file for details.
+**SlurmLedger** is licensed under **MIT**—see the [LICENSE](LICENSE) file for details.

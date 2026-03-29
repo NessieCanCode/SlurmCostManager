@@ -2,7 +2,7 @@
   "version": "1.0.0",
   "name": "slurmcostmanager",
   "summary": "Web UI for analyzing and managing Slurm accounting costs",
-  "description": "Cockpit plugin that lets users view consolidated Slurm charges, retrieve invoice PDFs, and drill into cost breakdowns (core-hours, instance-hours, GB-month) for historical analysis and auditing.",
+  "description": "Cockpit plugin that lets HPC admins view consolidated Slurm charges, retrieve invoice PDFs, and drill into cost breakdowns (core-hours, GPU-hours) for historical analysis and auditing.",
   "license": "MIT",
   "tags": ["billing", "slurm", "cost", "accounting", "cloud"],
   "requires": {
@@ -11,7 +11,7 @@
   "menu": {
     "slurmcostmanager": {
       "path": "slurmcostmanager.html",
-      "label": "Slurm Cost Manager"
+      "label": "SlurmLedger"
     }
   }
 }

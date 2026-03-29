@@ -49,7 +49,7 @@ rpm: package
 >rm -rf rpmbuild
 >mkdir -p rpmbuild/BUILD rpmbuild/RPMS rpmbuild/SOURCES rpmbuild/SPECS rpmbuild/SRPMS
 >cp slurmcostmanager-$(VERSION).tar.gz rpmbuild/SOURCES/
->printf 'Summary: Slurm Cost Manager\nName: slurmcostmanager\nVersion: $(VERSION)\nRelease: 1\nLicense: MIT\nSource0: %%{name}-%%{version}.tar.gz\nBuildArch: noarch\nRequires: cockpit\n%%description\nSlurm Cost Manager Cockpit plugin\n%%prep\n%%setup -q\n%%build\n%%install\nmkdir -p %%{buildroot}/usr/share/cockpit/slurmcostmanager\ncp -a * %%{buildroot}/usr/share/cockpit/slurmcostmanager/\n%%files\n/usr/share/cockpit/slurmcostmanager\n' > rpmbuild/SPECS/slurmcostmanager.spec
+>printf 'Summary: SlurmLedger\nName: slurmcostmanager\nVersion: $(VERSION)\nRelease: 1\nLicense: MIT\nSource0: %%{name}-%%{version}.tar.gz\nBuildArch: noarch\nRequires: cockpit\n%%description\nSlurmLedger Cockpit plugin\n%%prep\n%%setup -q\n%%build\n%%install\nmkdir -p %%{buildroot}/usr/share/cockpit/slurmcostmanager\ncp -a * %%{buildroot}/usr/share/cockpit/slurmcostmanager/\n%%files\n/usr/share/cockpit/slurmcostmanager\n' > rpmbuild/SPECS/slurmcostmanager.spec
 >$(RPMBUILD) --define "_topdir $(PWD)/rpmbuild" -bb rpmbuild/SPECS/slurmcostmanager.spec
 
 deb: package
@@ -57,7 +57,7 @@ deb: package
 >mkdir -p debbuild/usr/share/cockpit/slurmcostmanager
 >cp -a $(DIST)/* debbuild/usr/share/cockpit/slurmcostmanager/
 >mkdir -p debbuild/DEBIAN
->echo "Package: slurmcostmanager\nVersion: $(VERSION)\nSection: admin\nPriority: optional\nArchitecture: all\nMaintainer: Unknown\nDepends: cockpit\nDescription: Slurm Cost Manager Cockpit plugin" > debbuild/DEBIAN/control
+>echo "Package: slurmcostmanager\nVersion: $(VERSION)\nSection: admin\nPriority: optional\nArchitecture: all\nMaintainer: Unknown\nDepends: cockpit\nDescription: SlurmLedger Cockpit plugin" > debbuild/DEBIAN/control
 >dpkg-deb --build debbuild slurmcostmanager_$(VERSION)_all.deb
 >rm -rf debbuild
 
