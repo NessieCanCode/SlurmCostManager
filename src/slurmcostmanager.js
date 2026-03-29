@@ -1043,6 +1043,8 @@ function Details({
       a.click();
       document.body.removeChild(a);
       URL.revokeObjectURL(url);
+      // Record the invoice in the ledger
+      await saveInvoiceToLedger({ ...invoiceData, account: filters.account || '' }, totals.cost);
     } catch (e) {
       console.error(e);
       setError(e.message || String(e));
@@ -1259,6 +1261,10 @@ function InstitutionProfile() {
   function handleLogo(e) {
     const file = e.target.files && e.target.files[0];
     if (!file) return;
+    if (file.size > 256 * 1024) {
+      setError('Logo file must be under 256KB');
+      return;
+    }
     const reader = new FileReader();
     reader.onload = () => {
       setProfile(prev => ({ ...prev, logo: reader.result }));
@@ -2139,6 +2145,488 @@ function Rates({ onRatesUpdated }) {
   );
 }
 
+// ---------------------------------------------------------------------------
+// Invoice Ledger helpers
+// ---------------------------------------------------------------------------
+const INVOICE_LEDGER_PATH = '/etc/slurmledger/invoices.json';
+const INVOICE_LEDGER_PATH_FALLBACK = `${
+  (typeof window !== 'undefined' &&
+    window.cockpit &&
+    window.cockpit.user &&
+    window.cockpit.user()) || {}
+}.home || ''}/slurmledger/invoices.json`;
+
+function getInvoiceLedgerPath() {
+  // Use /etc path when running as root/admin, otherwise user-local path
+  return INVOICE_LEDGER_PATH;
+}
+
+async function loadInvoiceLedger() {
+  try {
+    if (window.cockpit && window.cockpit.file) {
+      const text = await window.cockpit.file(getInvoiceLedgerPath()).read();
+      return JSON.parse(text);
+    } else {
+      const resp = await fetch('invoices.json');
+      if (!resp.ok) return { invoices: [] };
+      return await resp.json();
+    }
+  } catch (e) {
+    return { invoices: [] };
+  }
+}
+
+async function saveInvoiceLedger(ledger) {
+  const text = JSON.stringify(ledger, null, 2);
+  if (window.cockpit && window.cockpit.file) {
+    await window.cockpit.file(getInvoiceLedgerPath()).replace(text);
+  } else {
+    await fetch('invoices.json', {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: text
+    });
+  }
+}
+
+function generateRefundId(invoices) {
+  const year = new Date().getFullYear();
+  const existing = invoices.flatMap(inv => inv.refunds || []);
+  const nums = existing
+    .map(r => r.id)
+    .filter(id => id && id.startsWith(`REF-${year}-`))
+    .map(id => parseInt(id.split('-')[2], 10))
+    .filter(n => !isNaN(n));
+  const next = nums.length ? Math.max(...nums) + 1 : 1;
+  return `REF-${year}-${String(next).padStart(3, '0')}`;
+}
+
+// Status badge colours
+const STATUS_COLORS = {
+  draft: '#6b7280',
+  sent: '#3b82f6',
+  viewed: '#d97706',
+  paid: '#16a34a',
+  cancelled: '#dc2626',
+  refunded: '#ea580c'
+};
+
+function StatusBadge({ status }) {
+  const color = STATUS_COLORS[status] || '#6b7280';
+  return React.createElement(
+    'span',
+    {
+      style: {
+        display: 'inline-block',
+        padding: '2px 8px',
+        borderRadius: '12px',
+        backgroundColor: color,
+        color: '#fff',
+        fontSize: '0.75em',
+        fontWeight: 'bold',
+        textTransform: 'capitalize'
+      }
+    },
+    status
+  );
+}
+
+function RefundModal({ invoice, currentUser, onClose, onIssue }) {
+  const [amount, setAmount] = useState(invoice.amount || 0);
+  const [reason, setReason] = useState('');
+  const [partial, setPartial] = useState(false);
+  const [error, setError] = useState(null);
+
+  function handleSubmit() {
+    const amt = parseFloat(amount);
+    if (!Number.isFinite(amt) || amt <= 0) {
+      setError('Enter a valid refund amount');
+      return;
+    }
+    if (!reason.trim()) {
+      setError('Reason is required');
+      return;
+    }
+    if (amt > invoice.amount) {
+      setError('Refund cannot exceed invoice amount');
+      return;
+    }
+    onIssue({ amount: amt, reason: reason.trim(), partial });
+  }
+
+  return React.createElement(
+    'div',
+    { className: 'modal-overlay', onClick: onClose },
+    React.createElement(
+      'div',
+      {
+        className: 'modal',
+        onClick: e => e.stopPropagation(),
+        style: { maxWidth: '480px', width: '90%' }
+      },
+      React.createElement('h3', null, `Issue Refund — ${invoice.id}`),
+      React.createElement(
+        'div',
+        { style: { marginBottom: '0.75em' } },
+        React.createElement('label', null, 'Refund Amount ($): '),
+        React.createElement('input', {
+          type: 'number',
+          step: '0.01',
+          value: amount,
+          onChange: e => {
+            setAmount(e.target.value);
+            setPartial(parseFloat(e.target.value) < invoice.amount);
+          },
+          style: { width: '100%', marginTop: '4px' }
+        })
+      ),
+      React.createElement(
+        'div',
+        { style: { marginBottom: '0.75em' } },
+        React.createElement('label', null, 'Reason: '),
+        React.createElement('textarea', {
+          value: reason,
+          onChange: e => setReason(e.target.value),
+          rows: 3,
+          style: { width: '100%', marginTop: '4px' }
+        })
+      ),
+      React.createElement(
+        'div',
+        { style: { marginBottom: '0.75em' } },
+        React.createElement('label', null,
+          React.createElement('input', {
+            type: 'checkbox',
+            checked: partial,
+            onChange: e => setPartial(e.target.checked),
+            style: { marginRight: '6px' }
+          }),
+          'Partial refund'
+        )
+      ),
+      error && React.createElement('p', { className: 'error' }, error),
+      React.createElement(
+        'div',
+        { style: { display: 'flex', gap: '0.5em', justifyContent: 'flex-end' } },
+        React.createElement('button', { onClick: onClose }, 'Cancel'),
+        React.createElement(
+          'button',
+          { onClick: handleSubmit, style: { backgroundColor: '#ea580c', color: '#fff' } },
+          'Issue Refund'
+        )
+      )
+    )
+  );
+}
+
+function Invoices({ currentUser }) {
+  const [ledger, setLedger] = useState({ invoices: [] });
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(null);
+  const [filterStatus, setFilterStatus] = useState('');
+  const [filterAccount, setFilterAccount] = useState('');
+  const [filterPeriod, setFilterPeriod] = useState('');
+  const [refundTarget, setRefundTarget] = useState(null);
+
+  useEffect(() => {
+    setLoading(true);
+    loadInvoiceLedger()
+      .then(data => {
+        setLedger(data || { invoices: [] });
+        setLoading(false);
+      })
+      .catch(e => {
+        setError(e.message || String(e));
+        setLoading(false);
+      });
+  }, []);
+
+  async function updateInvoice(id, patch) {
+    const updated = {
+      ...ledger,
+      invoices: ledger.invoices.map(inv =>
+        inv.id === id ? { ...inv, ...patch } : inv
+      )
+    };
+    try {
+      await saveInvoiceLedger(updated);
+      setLedger(updated);
+    } catch (e) {
+      setError('Failed to save: ' + (e.message || String(e)));
+    }
+  }
+
+  async function handleMarkSent(inv) {
+    await updateInvoice(inv.id, {
+      status: 'sent',
+      sent: new Date().toISOString()
+    });
+  }
+
+  async function handleMarkPaid(inv) {
+    await updateInvoice(inv.id, {
+      status: 'paid',
+      paid: new Date().toISOString()
+    });
+  }
+
+  async function handleCancel(inv) {
+    if (!window.confirm(`Cancel invoice ${inv.id}?`)) return;
+    await updateInvoice(inv.id, { status: 'cancelled' });
+  }
+
+  async function handleIssueRefund(inv, { amount, reason, partial: isPartial }) {
+    const refund = {
+      id: generateRefundId(ledger.invoices),
+      amount,
+      reason,
+      date: new Date().toISOString(),
+      issuedBy: currentUser || 'admin'
+    };
+    const existingRefunds = inv.refunds || [];
+    const newStatus = isPartial ? inv.status : 'refunded';
+    await updateInvoice(inv.id, {
+      status: newStatus,
+      refunds: [...existingRefunds, refund]
+    });
+    setRefundTarget(null);
+    // Generate credit memo PDF
+    await generateCreditMemo(inv, refund);
+  }
+
+  async function generateCreditMemo(inv, refund) {
+    if (!HAS_COCKPIT) return;
+    try {
+      const creditData = {
+        invoice_number: `CM-${refund.id}`,
+        date_issued: new Date().toLocaleDateString('en-US', { year: 'numeric', month: 'long', day: 'numeric' }),
+        due_date: '',
+        period: inv.period || '',
+        is_credit_memo: true,
+        original_invoice: inv.id,
+        refund_reason: refund.reason,
+        items: (inv.items || []).map(item => ({
+          ...item,
+          amount: -Math.abs(item.amount || 0),
+          description: `CREDIT: ${item.description || ''}`
+        })),
+        subtotal: -Math.abs(refund.amount),
+        discount: 0,
+        tax: 0,
+        total_due: -Math.abs(refund.amount),
+        institution: inv.institution || {},
+        logo: inv.logo || '',
+        bank_info: inv.bank_info || [],
+        notes: `Credit memo for ${refund.reason}. Original invoice: ${inv.id}.`
+      };
+      const output = await window.cockpit.spawn(
+        ['python3', `${PLUGIN_BASE}/invoice.py`],
+        { input: JSON.stringify(creditData), err: 'out' }
+      );
+      const trimmed = output.trim();
+      if (!trimmed) return;
+      let byteChars;
+      try { byteChars = atob(trimmed); } catch (_) { return; }
+      const bytes = new Uint8Array(byteChars.length);
+      for (let i = 0; i < byteChars.length; i++) bytes[i] = byteChars.charCodeAt(i);
+      const blob = new Blob([bytes], { type: 'application/pdf' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `credit_memo_${refund.id}.pdf`;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+    } catch (e) {
+      console.error('Credit memo generation failed:', e);
+    }
+  }
+
+  const invoices = ledger.invoices || [];
+  const allAccounts = [...new Set(invoices.map(inv => inv.account).filter(Boolean))];
+  const allPeriods = [...new Set(invoices.map(inv => inv.period).filter(Boolean))].sort().reverse();
+
+  const filtered = invoices.filter(inv => {
+    if (filterStatus && inv.status !== filterStatus) return false;
+    if (filterAccount && inv.account !== filterAccount) return false;
+    if (filterPeriod && inv.period !== filterPeriod) return false;
+    return true;
+  });
+
+  if (loading) return React.createElement('p', null, 'Loading invoices...');
+
+  return React.createElement(
+    'div',
+    null,
+    React.createElement('h2', null, 'Invoices'),
+    error && React.createElement('p', { className: 'error' }, error),
+
+    // Filters
+    React.createElement(
+      'div',
+      { className: 'filter-bar', style: { marginBottom: '1em' } },
+      React.createElement(
+        'select',
+        { value: filterStatus, onChange: e => setFilterStatus(e.target.value) },
+        React.createElement('option', { value: '' }, 'All Statuses'),
+        ['draft', 'sent', 'viewed', 'paid', 'cancelled', 'refunded'].map(s =>
+          React.createElement('option', { key: s, value: s }, s)
+        )
+      ),
+      React.createElement(
+        'select',
+        { value: filterAccount, onChange: e => setFilterAccount(e.target.value) },
+        React.createElement('option', { value: '' }, 'All Accounts'),
+        allAccounts.map(a => React.createElement('option', { key: a, value: a }, a))
+      ),
+      React.createElement(
+        'select',
+        { value: filterPeriod, onChange: e => setFilterPeriod(e.target.value) },
+        React.createElement('option', { value: '' }, 'All Periods'),
+        allPeriods.map(p => React.createElement('option', { key: p, value: p }, p))
+      )
+    ),
+
+    // Table
+    filtered.length === 0
+      ? React.createElement(
+          'div',
+          { className: 'empty-state' },
+          React.createElement('h3', null, 'No invoices found'),
+          React.createElement('p', null, 'Generate invoices from the Detailed Transactions view.')
+        )
+      : React.createElement(
+          'div',
+          { className: 'table-container' },
+          React.createElement(
+            'table',
+            { className: 'details-table' },
+            React.createElement(
+              'thead',
+              null,
+              React.createElement(
+                'tr',
+                null,
+                React.createElement('th', null, 'Invoice #'),
+                React.createElement('th', null, 'Account'),
+                React.createElement('th', null, 'Period'),
+                React.createElement('th', null, 'Amount'),
+                React.createElement('th', null, 'Status'),
+                React.createElement('th', null, 'Created'),
+                React.createElement('th', null, 'Actions')
+              )
+            ),
+            React.createElement(
+              'tbody',
+              null,
+              filtered.map(inv =>
+                React.createElement(
+                  'tr',
+                  { key: inv.id },
+                  React.createElement('td', null, inv.id),
+                  React.createElement('td', null, inv.account || ''),
+                  React.createElement('td', null, inv.period || ''),
+                  React.createElement('td', null, inv.amount != null ? `$${Number(inv.amount).toFixed(2)}` : ''),
+                  React.createElement('td', null, React.createElement(StatusBadge, { status: inv.status })),
+                  React.createElement('td', null, inv.created ? new Date(inv.created).toLocaleDateString() : ''),
+                  React.createElement(
+                    'td',
+                    { style: { whiteSpace: 'nowrap' } },
+                    // Mark Sent
+                    inv.status === 'draft' && React.createElement(
+                      'button',
+                      {
+                        className: 'link-btn',
+                        onClick: () => handleMarkSent(inv),
+                        style: { marginRight: '6px' }
+                      },
+                      'Mark Sent'
+                    ),
+                    // Mark Paid
+                    (inv.status === 'sent' || inv.status === 'viewed') && React.createElement(
+                      'button',
+                      {
+                        className: 'link-btn',
+                        onClick: () => handleMarkPaid(inv),
+                        style: { marginRight: '6px' }
+                      },
+                      'Mark Paid'
+                    ),
+                    // Issue Refund
+                    inv.status === 'paid' && React.createElement(
+                      'button',
+                      {
+                        className: 'link-btn',
+                        onClick: () => setRefundTarget(inv),
+                        style: { marginRight: '6px', color: '#ea580c' }
+                      },
+                      'Issue Refund'
+                    ),
+                    // Cancel
+                    !['cancelled', 'refunded', 'paid'].includes(inv.status) && React.createElement(
+                      'button',
+                      {
+                        className: 'link-btn',
+                        onClick: () => handleCancel(inv),
+                        style: { color: '#dc2626' }
+                      },
+                      'Cancel'
+                    ),
+                    // Refund total indicator
+                    inv.refunds && inv.refunds.length > 0 && React.createElement(
+                      'span',
+                      { style: { marginLeft: '6px', fontSize: '0.8em', color: '#ea580c' } },
+                      `Refunded: $${inv.refunds.reduce((s, r) => s + (r.amount || 0), 0).toFixed(2)}`
+                    )
+                  )
+                )
+              )
+            )
+          )
+        ),
+
+    // Refund modal
+    refundTarget && React.createElement(RefundModal, {
+      invoice: refundTarget,
+      currentUser,
+      onClose: () => setRefundTarget(null),
+      onIssue: (opts) => handleIssueRefund(refundTarget, opts)
+    })
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Invoice ledger integration: save invoice to ledger when generated
+// ---------------------------------------------------------------------------
+async function saveInvoiceToLedger(invoiceData, amount) {
+  try {
+    const ledger = await loadInvoiceLedger();
+    const entry = {
+      id: invoiceData.invoice_number,
+      account: (invoiceData.items || []).length > 0
+        ? (invoiceData.account || '')
+        : '',
+      period: invoiceData.period || '',
+      amount: amount,
+      status: 'draft',
+      created: new Date().toISOString(),
+      sent: null,
+      paid: null,
+      notes: invoiceData.notes || '',
+      items: invoiceData.items || [],
+      institution: invoiceData.institution || {},
+      logo: invoiceData.logo || '',
+      bank_info: invoiceData.bank_info || [],
+      refunds: []
+    };
+    ledger.invoices = [...(ledger.invoices || []), entry];
+    await saveInvoiceLedger(ledger);
+  } catch (e) {
+    console.warn('Failed to save invoice to ledger:', e);
+  }
+}
+
 function useInstitutionProfile() {
   const [profile, setProfile] = useState({});
   useEffect(() => {
@@ -2162,6 +2650,306 @@ function useInstitutionProfile() {
   return profile;
 }
 
+// ---------------------------------------------------------------------------
+// Role detection
+// ---------------------------------------------------------------------------
+async function detectUserRole(username, roleConfig) {
+  if (!username) return 'member';
+  const admins = (roleConfig && roleConfig.admins) || [];
+  const finance = (roleConfig && roleConfig.finance) || [];
+  if (admins.includes(username)) return 'admin';
+  if (finance.includes(username)) return 'finance';
+  // Check if user is a SLURM account coordinator (PI)
+  if (HAS_COCKPIT) {
+    try {
+      const out = await window.cockpit.spawn(
+        ['sacctmgr', 'show', 'user', username, 'withassoc', '--parsable2', '--noheader'],
+        { err: 'ignore' }
+      );
+      // If sacctmgr returns rows with coordinator='Yes' they are a PI
+      if (out && out.includes('Yes')) return 'pi';
+    } catch (_) {
+      // sacctmgr not available or user not found — fall through
+    }
+  }
+  return 'member';
+}
+
+function useCurrentUser() {
+  const [username, setUsername] = useState('');
+  const [userRole, setUserRole] = useState('admin'); // default admin until resolved
+  const [roleConfig, setRoleConfig] = useState({ admins: [], finance: [], pis: [] });
+
+  useEffect(() => {
+    async function resolve() {
+      let name = '';
+      try {
+        if (HAS_COCKPIT && window.cockpit.user) {
+          const info = await window.cockpit.user();
+          name = info.name || info.user || '';
+        }
+      } catch (_) {}
+      setUsername(name);
+
+      // Load role config from institution.json roles block
+      let cfg = { admins: [], finance: [], pis: [] };
+      try {
+        let text;
+        if (window.cockpit && window.cockpit.file) {
+          text = await window.cockpit.file(`${PLUGIN_BASE}/institution.json`).read();
+        } else {
+          const resp = await fetch('institution.json');
+          if (resp.ok) text = await resp.text();
+        }
+        if (text) {
+          const json = JSON.parse(text);
+          cfg = json.roles || cfg;
+        }
+      } catch (_) {}
+      setRoleConfig(cfg);
+
+      const role = await detectUserRole(name, cfg);
+      setUserRole(role);
+    }
+    resolve();
+  }, []);
+
+  return { username, userRole, roleConfig };
+}
+
+// Role-gated nav tabs definition
+function getNavTabs(userRole) {
+  const tabs = [
+    { id: 'year', label: 'Fiscal Year Overview', roles: ['admin', 'pi', 'member', 'finance'] },
+    { id: 'summary', label: 'Monthly Summary Reports', roles: ['admin', 'pi', 'member', 'finance'] },
+    { id: 'details', label: 'Detailed Transactions', roles: ['admin', 'pi', 'member', 'finance'] },
+    { id: 'invoices', label: 'Invoices', roles: ['admin', 'pi', 'finance'] },
+    { id: 'settings', label: 'Administration', roles: ['admin'] }
+  ];
+  return tabs.filter(t => t.roles.includes(userRole));
+}
+
+// ---------------------------------------------------------------------------
+// Role-specific dashboard variants (C3)
+// ---------------------------------------------------------------------------
+function AdminDashboard({ summary, details, daily, yearly, monthly, invoiceLedger = { invoices: [] } }) {
+  const historical = yearly.length ? yearly : monthly;
+  const historicalLabel = yearly.length
+    ? 'Historical CPU/GPU-hrs (yearly)'
+    : 'Historical CPU/GPU-hrs (monthly)';
+
+  // Invoice status summary
+  const invCounts = { draft: 0, sent: 0, paid: 0 };
+  (invoiceLedger.invoices || []).forEach(inv => {
+    if (inv.status in invCounts) invCounts[inv.status]++;
+  });
+
+  // Budget alerts: accounts over 80% of allocation (placeholder — allocation data not in schema yet)
+  const topAccounts = details.slice().sort((a, b) => (b.cost || 0) - (a.cost || 0)).slice(0, 5);
+
+  return React.createElement(
+    'div',
+    null,
+    React.createElement('h2', null, 'Admin Dashboard'),
+
+    // KPI row
+    React.createElement(
+      'div',
+      { className: 'kpi-grid' },
+      React.createElement(KpiTile, {
+        label: 'Total Cluster Cost This Period',
+        value: `$${summary ? summary.total : 0}`
+      }),
+      React.createElement(KpiTile, {
+        label: 'Invoices: Draft / Sent / Paid',
+        value: `${invCounts.draft} / ${invCounts.sent} / ${invCounts.paid}`
+      }),
+      React.createElement(KpiTile, {
+        label: 'Total CPU-hours',
+        value: summary ? summary.core_hours : 0,
+        renderChart: () => React.createElement(KpiSparkline, { data: daily.map(d => d.core_hours) })
+      })
+    ),
+
+    // Top 5 accounts by cost
+    React.createElement('h3', null, 'Top 5 Accounts by Cost'),
+    React.createElement(
+      'div',
+      { className: 'table-container' },
+      React.createElement(
+        'table',
+        { className: 'summary-table' },
+        React.createElement(
+          'thead',
+          null,
+          React.createElement(
+            'tr',
+            null,
+            React.createElement('th', null, 'Account'),
+            React.createElement('th', null, 'Cost ($)'),
+            React.createElement('th', null, 'Core Hours')
+          )
+        ),
+        React.createElement(
+          'tbody',
+          null,
+          topAccounts.map(a =>
+            React.createElement(
+              'tr',
+              { key: a.account },
+              React.createElement('td', null, a.account),
+              React.createElement('td', null, a.cost),
+              React.createElement('td', null, a.core_hours)
+            )
+          )
+        )
+      )
+    ),
+
+    React.createElement(
+      'div',
+      { className: 'summary-charts' },
+      React.createElement(
+        'div',
+        { className: 'summary-chart' },
+        React.createElement('h3', null, 'CPU/GPU-hrs per Slurm account'),
+        React.createElement(AccountsChart, { details })
+      ),
+      React.createElement(
+        'div',
+        { className: 'summary-chart' },
+        React.createElement('h3', null, historicalLabel),
+        React.createElement(HistoricalUsageChart, { data: historical })
+      )
+    )
+  );
+}
+
+function PiDashboard({ summary, details, daily, username }) {
+  // Filter to PI's accounts (accounts where username matches a user in the account)
+  const myAccounts = details.filter(d =>
+    (d.users || []).some(u => u.user === username)
+  );
+  const totalCost = myAccounts.reduce((s, a) => s + (a.cost || 0), 0);
+  const totalCoreHours = myAccounts.reduce((s, a) => s + (a.core_hours || 0), 0);
+
+  // User breakdown within PI's accounts
+  const userMap = {};
+  myAccounts.forEach(acct => {
+    (acct.users || []).forEach(u => {
+      userMap[u.user] = (userMap[u.user] || 0) + (u.cost || 0);
+    });
+  });
+  const userBreakdown = Object.entries(userMap)
+    .map(([user, cost]) => ({ user, cost }))
+    .sort((a, b) => b.cost - a.cost);
+
+  return React.createElement(
+    'div',
+    null,
+    React.createElement('h2', null, 'My Account Dashboard'),
+    React.createElement(
+      'div',
+      { className: 'kpi-grid' },
+      React.createElement(KpiTile, {
+        label: 'Total Cost This Period',
+        value: `$${totalCost.toFixed(2)}`
+      }),
+      React.createElement(KpiTile, {
+        label: 'Total Core Hours',
+        value: totalCoreHours.toFixed(2),
+        renderChart: () => React.createElement(KpiSparkline, { data: daily.map(d => d.core_hours) })
+      })
+    ),
+    React.createElement('h3', null, 'User Breakdown'),
+    React.createElement(
+      'div',
+      { className: 'table-container' },
+      React.createElement(
+        'table',
+        { className: 'summary-table' },
+        React.createElement(
+          'thead',
+          null,
+          React.createElement('tr', null,
+            React.createElement('th', null, 'User'),
+            React.createElement('th', null, 'Cost ($)')
+          )
+        ),
+        React.createElement(
+          'tbody',
+          null,
+          userBreakdown.map(u =>
+            React.createElement('tr', { key: u.user },
+              React.createElement('td', null, u.user),
+              React.createElement('td', null, u.cost.toFixed(2))
+            )
+          )
+        )
+      )
+    )
+  );
+}
+
+function MemberDashboard({ summary, details, daily, username }) {
+  // Filter to only this user's jobs
+  const myJobs = [];
+  details.forEach(acct => {
+    (acct.users || []).filter(u => u.user === username).forEach(u => {
+      (u.jobs || []).forEach(j => myJobs.push({ ...j, account: acct.account }));
+    });
+  });
+
+  const myCost = myJobs.reduce((s, j) => s + (j.cost || 0), 0);
+  const myCoreHours = myJobs.reduce((s, j) => s + (j.core_hours || 0), 0);
+
+  return React.createElement(
+    'div',
+    null,
+    React.createElement('h2', null, 'My Usage'),
+    React.createElement(
+      'div',
+      { className: 'kpi-grid' },
+      React.createElement(KpiTile, {
+        label: 'My Cost This Period',
+        value: `$${myCost.toFixed(2)}`
+      }),
+      React.createElement(KpiTile, {
+        label: 'My Core Hours',
+        value: myCoreHours.toFixed(2)
+      })
+    ),
+    myJobs.length > 0 &&
+      React.createElement(
+        'div',
+        null,
+        React.createElement('h3', null, 'My Recent Jobs'),
+        React.createElement(PaginatedJobTable, { jobs: myJobs.slice(0, 50) })
+      )
+  );
+}
+
+function RoleAwareSummary({ summary, details, daily, yearly, monthly, userRole, username, invoiceLedger }) {
+  if (!summary) {
+    return React.createElement(
+      'div',
+      { className: 'empty-state' },
+      React.createElement('h3', null, 'No billing data available'),
+      React.createElement('p', null, 'No jobs were found for the selected period.')
+    );
+  }
+
+  if (userRole === 'admin' || userRole === 'finance') {
+    return React.createElement(AdminDashboard, {
+      summary, details, daily, yearly: yearly || [], monthly: monthly || [], invoiceLedger
+    });
+  }
+  if (userRole === 'pi') {
+    return React.createElement(PiDashboard, { summary, details, daily, username });
+  }
+  return React.createElement(MemberDashboard, { summary, details, daily, username });
+}
+
 function App() {
   const [view, setView] = useState('year');
   const now = new Date();
@@ -2175,12 +2963,36 @@ function App() {
   const period = view === 'year' ? yearPeriod : month;
   const { data, error, loading, reload } = useBillingData(period);
   const institutionProfile = useInstitutionProfile();
+  const { username, userRole } = useCurrentUser();
+  const [invoiceLedger, setInvoiceLedger] = useState({ invoices: [] });
+
+  // Load invoice ledger for admin dashboard summary
+  useEffect(() => {
+    loadInvoiceLedger().then(setInvoiceLedger).catch(() => {});
+  }, []);
+
+  // Filter details by role
   const details = useMemo(() => {
     if (!data) return [];
-    return view === 'year'
+    const raw = view === 'year'
       ? aggregateAccountDetails(data.details || [])
       : data.details || [];
-  }, [data, view]);
+    if (userRole === 'pi') {
+      // PI sees only accounts where they are a user
+      return raw.filter(d => (d.users || []).some(u => u.user === username));
+    }
+    if (userRole === 'member') {
+      // Member sees only their own user entry per account
+      return raw
+        .map(d => ({
+          ...d,
+          users: (d.users || []).filter(u => u.user === username)
+        }))
+        .filter(d => d.users.length > 0);
+    }
+    return raw;
+  }, [data, view, userRole, username]);
+
   const [showErrorDetails, setShowErrorDetails] = useState(false);
   const monthOptions = [];
   for (let i = 0; i < 24; i++) {
@@ -2188,34 +3000,63 @@ function App() {
     monthOptions.push(`${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`);
   }
 
+  const navTabs = getNavTabs(userRole);
+
+  // Redirect to first available tab if current view is not allowed
+  const allowedViews = navTabs.map(t => t.id);
+  const activeView = allowedViews.includes(view) ? view : allowedViews[0];
+
   return React.createElement(
     'div',
     { className: 'app' },
+
+    // Header with role indicator
+    React.createElement(
+      'div',
+      {
+        style: {
+          display: 'flex',
+          justifyContent: 'space-between',
+          alignItems: 'center',
+          padding: '0.5em 0',
+          marginBottom: '0.5em',
+          borderBottom: '1px solid #e5e7eb'
+        }
+      },
+      React.createElement('span', { style: { fontWeight: 'bold', fontSize: '1.1em' } }, 'SlurmLedger'),
+      React.createElement(
+        'span',
+        {
+          style: {
+            fontSize: '0.85em',
+            color: '#6b7280',
+            backgroundColor: '#f3f4f6',
+            padding: '3px 10px',
+            borderRadius: '12px'
+          }
+        },
+        username
+          ? `Logged in as: ${username} (${userRole.charAt(0).toUpperCase() + userRole.slice(1)})`
+          : `Role: ${userRole.charAt(0).toUpperCase() + userRole.slice(1)}`
+      )
+    ),
+
     React.createElement(
       'nav',
       null,
-      React.createElement(
-        'button',
-        { onClick: () => setView('year') },
-        'Fiscal Year Overview'
-      ),
-      React.createElement(
-        'button',
-        { onClick: () => setView('summary') },
-        'Monthly Summary Reports'
-      ),
-      React.createElement(
-        'button',
-        { onClick: () => setView('details') },
-        'Detailed Transactions'
-      ),
-      React.createElement(
-        'button',
-        { onClick: () => setView('settings') },
-        'Administration'
+      navTabs.map(tab =>
+        React.createElement(
+          'button',
+          {
+            key: tab.id,
+            onClick: () => setView(tab.id),
+            style: activeView === tab.id ? { fontWeight: 'bold' } : undefined
+          },
+          tab.label
+        )
       )
     ),
-    view === 'summary' &&
+    activeView === 'summary' &&
       React.createElement(
         'div',
         { className: 'month-select' },
@@ -2232,8 +3073,9 @@ function App() {
           )
         )
       ),
-    view !== 'settings' && loading && React.createElement('p', null, 'Loading...'),
-    view !== 'settings' &&
+    activeView !== 'settings' && activeView !== 'invoices' && loading &&
+      React.createElement('p', null, 'Loading...'),
+    activeView !== 'settings' && activeView !== 'invoices' &&
       error &&
       React.createElement(
         'div',
@@ -2258,25 +3100,42 @@ function App() {
           React.createElement('pre', { className: 'error-details' }, error)
       ),
     data &&
-      view === 'year' &&
-      React.createElement(Summary, {
+      activeView === 'year' &&
+      React.createElement(RoleAwareSummary, {
         summary: data.summary,
         details,
-        daily: data.daily,
-        yearly: data.yearly
+        daily: data.daily || [],
+        yearly: data.yearly || [],
+        monthly: [],
+        userRole,
+        username,
+        invoiceLedger
       }),
     data &&
-      view === 'summary' &&
-      React.createElement(Summary, {
+      activeView === 'summary' &&
+      React.createElement(RoleAwareSummary, {
         summary: data.summary,
         details,
-        daily: data.daily,
-        monthly: data.monthly
+        daily: data.daily || [],
+        yearly: [],
+        monthly: data.monthly || [],
+        userRole,
+        username,
+        invoiceLedger
       }),
     data &&
-      view === 'details' &&
+      activeView === 'details' &&
       React.createElement(Details, {
-        details: data.details,
+        details: userRole === 'member'
+          ? (data.details || []).map(d => ({
+              ...d,
+              users: (d.users || []).filter(u => u.user === username)
+            })).filter(d => d.users.length > 0)
+          : userRole === 'pi'
+          ? (data.details || []).filter(d =>
+              (d.users || []).some(u => u.user === username)
+            )
+          : data.details,
         daily: data.daily,
         partitions: data.partitions,
         accounts: data.accounts,
@@ -2286,7 +3145,8 @@ function App() {
         monthOptions,
         institutionProfile
       }),
-    view === 'settings' && React.createElement(Rates, { onRatesUpdated: reload })
+    activeView === 'invoices' && React.createElement(Invoices, { currentUser: username }),
+    activeView === 'settings' && React.createElement(Rates, { onRatesUpdated: reload })
   );
 }
 

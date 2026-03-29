@@ -8,8 +8,64 @@ on:
         required: true
 
 jobs:
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.x'
+      - name: Install Python lint deps
+        run: pip install flake8==7.1.1
+      - name: Python lint
+        run: flake8 src test
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '18'
+      - name: Install ESLint
+        run: |
+          npm init -y >/dev/null 2>&1
+          npm install eslint@9.0.0 >/dev/null 2>&1
+      - name: JavaScript lint
+        run: npx eslint src test --ext .js
+
+  unit-tests:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.x'
+      - name: Python unit tests
+        run: |
+          pip install pytest==8.3.3 >/dev/null 2>&1
+          PYTHONPATH=src python test/unit/slurmdb_validation.test.py
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '18'
+      - name: Node unit tests
+        run: node test/unit/calculator.test.js
+
+  security-scan:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.x'
+      - name: Install Bandit
+        run: pip install bandit==1.8.0
+      - name: Run Bandit
+        run: bandit -r src
+
   release:
     runs-on: ubuntu-latest
+    needs: [lint, unit-tests, security-scan]
     steps:
       - uses: actions/checkout@v4
       - name: Set up Node

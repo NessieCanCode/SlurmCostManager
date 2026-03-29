@@ -1,3 +1,5 @@
+/* TODO: Update to Chart.js 4.4.7. Download from https://cdn.jsdelivr.net/npm/chart.js@4.4.7/dist/chart.umd.js
+ * and replace this file. Current version (4.4.2) has known minor issues fixed in 4.4.7. */
 /*!
  * Chart.js v4.4.2
  * https://www.chartjs.org

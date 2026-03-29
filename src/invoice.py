@@ -13,6 +13,7 @@ import base64
 import io
 import json
 import os
+import re
 import sys
 import logging
 import tempfile
@@ -54,6 +55,14 @@ COLOR_RULE = colors.HexColor("#e5e7eb")
 PAGE_W, PAGE_H = LETTER
 MARGIN = 0.6 * inch
 CONTENT_W = PAGE_W - 2 * MARGIN
+
+
+# ---------------------------------------------------------------------------
+# Input sanitization
+# ---------------------------------------------------------------------------
+def sanitize_for_paragraph(text):
+    """Strip HTML/XML tags to prevent reportlab markup injection."""
+    return re.sub(r'<[^>]+>', '', str(text))
 
 
 # ---------------------------------------------------------------------------
@@ -195,13 +204,13 @@ def _build_header(invoice_data, styles, logo_path):
         except Exception as exc:
             logging.warning("Could not embed logo: %s", exc)
 
-    left_paras.append(Paragraph("<b>" + (dept or "Your Institution") + "</b>", styles["Normal"]))
+    left_paras.append(Paragraph("<b>" + sanitize_for_paragraph(dept or "Your Institution") + "</b>", styles["Normal"]))
     for line in address_lines:
         if line.strip():
-            left_paras.append(Paragraph(line, styles["Normal"]))
+            left_paras.append(Paragraph(sanitize_for_paragraph(line), styles["Normal"]))
     for line in contact_lines:
         if line.strip():
-            left_paras.append(Paragraph(line, styles["Small"]))
+            left_paras.append(Paragraph(sanitize_for_paragraph(line), styles["Small"]))
 
     # Right column: INVOICE title + meta
     inv_num = invoice_data.get("invoice_number", "")
@@ -210,8 +219,10 @@ def _build_header(invoice_data, styles, logo_path):
     period = invoice_data.get("period", "")
     payment_terms = invoice_data.get("payment_terms", "")
 
+    is_credit_memo = invoice_data.get("is_credit_memo", False)
+    title_text = "CREDIT MEMO" if is_credit_memo else "INVOICE"
     right_paras = [
-        Paragraph("INVOICE", styles["InvoiceTitle"]),
+        Paragraph(title_text, styles["InvoiceTitle"]),
         Spacer(1, 8),
     ]
 
@@ -224,6 +235,8 @@ def _build_header(invoice_data, styles, logo_path):
         meta_rows.append(("Period:", period))
     if payment_terms:
         meta_rows.append(("Terms:", payment_terms))
+    if invoice_data.get("original_invoice"):
+        meta_rows.append(("Original Invoice:", str(invoice_data["original_invoice"])))
 
     meta_label_style = ParagraphStyle(
         "MetaLabel",
@@ -242,7 +255,7 @@ def _build_header(invoice_data, styles, logo_path):
     for label, val in meta_rows:
         right_paras.append(
             Table(
-                [[Paragraph(label, meta_label_style), Paragraph(val, meta_val_style)]],
+                [[Paragraph(label, meta_label_style), Paragraph(sanitize_for_paragraph(val), meta_val_style)]],
                 colWidths=[0.9 * inch, 1.5 * inch],
                 style=TableStyle([
                     ("VALIGN", (0, 0), (-1, -1), "TOP"),
@@ -282,13 +295,13 @@ def _build_bill_to(invoice_data, styles):
 
     bill_to_lines = []
     name_parts = [contact.get("fullName", ""), contact.get("title", "")]
-    name_str = ", ".join(p for p in name_parts if p)
+    name_str = ", ".join(sanitize_for_paragraph(p) for p in name_parts if p)
     if name_str:
         bill_to_lines.append(name_str)
 
     dept = institution.get("department") or institution.get("name", "")
     if dept:
-        bill_to_lines.append(dept)
+        bill_to_lines.append(sanitize_for_paragraph(dept))
 
     address_parts = [
         institution.get("address", ""),
@@ -297,11 +310,11 @@ def _build_bill_to(invoice_data, styles):
     ]
     for p in address_parts:
         if p.strip():
-            bill_to_lines.append(p)
+            bill_to_lines.append(sanitize_for_paragraph(p))
 
     email = contact.get("email", "")
     if email:
-        bill_to_lines.append(email)
+        bill_to_lines.append(sanitize_for_paragraph(email))
 
     content_paras = [Paragraph("<b>BILL TO</b>", styles["SectionHead"])]
     for line in bill_to_lines:
@@ -369,7 +382,7 @@ def _build_items_table(invoice_data, styles):
         rate_str = _fmt_currency(rate) if isinstance(rate, (int, float)) else str(rate)
         amt_str = _fmt_currency(amount) if isinstance(amount, (int, float)) else str(amount)
         table_data.append([
-            Paragraph(item.get("description", ""), cell_style),
+            Paragraph(sanitize_for_paragraph(item.get("description", "")), cell_style),
             Paragraph(qty_str, num_style),
             Paragraph(rate_str, num_style),
             Paragraph(amt_str, num_style),
@@ -450,11 +463,11 @@ def _build_footer_sections(invoice_data, styles):
     left_col = [Paragraph("<b>PAYMENT INFORMATION</b>", styles["SectionHead"])]
     for line in bank_info:
         if line.strip():
-            left_col.append(Paragraph(line, styles["Normal"]))
+            left_col.append(Paragraph(sanitize_for_paragraph(line), styles["Normal"]))
 
     right_col = [Paragraph("<b>NOTES</b>", styles["SectionHead"])]
     if notes:
-        right_col.append(Paragraph(notes, styles["Normal"]))
+        right_col.append(Paragraph(sanitize_for_paragraph(notes), styles["Normal"]))
 
     foot_table = Table(
         [[left_col, right_col]],

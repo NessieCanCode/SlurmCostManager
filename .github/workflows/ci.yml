@@ -16,7 +16,7 @@ jobs:
         with:
           python-version: '3.x'
       - name: Install Python lint deps
-        run: pip install flake8
+        run: pip install flake8==7.1.1
       - name: Python lint
         run: flake8 src test
       - name: Set up Node
@@ -26,7 +26,7 @@ jobs:
       - name: Install ESLint
         run: |
           npm init -y >/dev/null 2>&1
-          npm install eslint >/dev/null 2>&1
+          npm install eslint@9.0.0 >/dev/null 2>&1
       - name: JavaScript lint
         run: npx eslint src test --ext .js
 
@@ -40,7 +40,7 @@ jobs:
           python-version: '3.x'
       - name: Python unit tests
         run: |
-          pip install pytest >/dev/null 2>&1
+          pip install pytest==8.3.3 >/dev/null 2>&1
           PYTHONPATH=src python test/unit/slurmdb_validation.test.py
       - name: Set up Node
         uses: actions/setup-node@v4
@@ -73,6 +73,6 @@ jobs:
         with:
           python-version: '3.x'
       - name: Install Bandit
-        run: pip install bandit
+        run: pip install bandit==1.8.0
       - name: Run Bandit
         run: bandit -r src
