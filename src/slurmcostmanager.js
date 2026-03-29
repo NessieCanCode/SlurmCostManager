@@ -28,7 +28,10 @@ function getBillingPeriod(ref = new Date()) {
   } else {
     year = ref.getFullYear();
     month = ref.getMonth();
-    end = new Date(Date.UTC(year, month, ref.getDate()));
+    const isCurrent = year === today.getFullYear() && month === today.getMonth();
+    end = isCurrent
+      ? new Date(Date.UTC(today.getFullYear(), today.getMonth(), today.getDate()))
+      : new Date(Date.UTC(year, month + 1, 0));
   }
   const start = new Date(Date.UTC(year, month, 1));
   return {
@@ -508,17 +511,57 @@ function formatElapsed(sec) {
 }
 
 function PaginatedJobTable({ jobs }) {
-  const [sortAsc, setSortAsc] = useState(true);
+  const [sortField, setSortField] = useState('cost');
+  const [sortDirection, setSortDirection] = useState('asc');
   const [page, setPage] = useState(0);
   const pageSize = 10;
-  const sorted = jobs.slice().sort((a, b) =>
-    sortAsc ? a.cost - b.cost : b.cost - a.cost
-  );
+
+  function handleSort(field) {
+    if (field === sortField) {
+      setSortDirection(prev => (prev === 'asc' ? 'desc' : 'asc'));
+    } else {
+      setSortField(field);
+      setSortDirection('asc');
+    }
+    setPage(0);
+  }
+
+  function sortIndicator(field) {
+    if (field !== sortField) return '';
+    return sortDirection === 'asc' ? ' \u25b2' : ' \u25bc';
+  }
+
+  const sorted = jobs.slice().sort((a, b) => {
+    let aVal, bVal;
+    switch (sortField) {
+      case 'job': aVal = a.job || ''; bVal = b.job || ''; break;
+      case 'start': aVal = a.start || ''; bVal = b.start || ''; break;
+      case 'end': aVal = a.end || ''; bVal = b.end || ''; break;
+      case 'elapsed': aVal = a.elapsed || 0; bVal = b.elapsed || 0; break;
+      case 'core_hours': aVal = a.core_hours || 0; bVal = b.core_hours || 0; break;
+      case 'cost': aVal = a.cost || 0; bVal = b.cost || 0; break;
+      default: aVal = 0; bVal = 0;
+    }
+    let cmp;
+    if (typeof aVal === 'string') {
+      cmp = aVal.localeCompare(bVal);
+    } else {
+      cmp = aVal - bVal;
+    }
+    return sortDirection === 'asc' ? cmp : -cmp;
+  });
+
   const pages = Math.ceil(sorted.length / pageSize) || 1;
   const pageJobs = sorted.slice(page * pageSize, page * pageSize + pageSize);
-  function toggleSort() {
-    setSortAsc(prev => !prev);
+
+  function sortableTh(label, field) {
+    return React.createElement(
+      'th',
+      { className: 'clickable', onClick: () => handleSort(field) },
+      label + sortIndicator(field)
+    );
   }
+
   return React.createElement(
     'div',
     null,
@@ -531,21 +574,17 @@ function PaginatedJobTable({ jobs }) {
         React.createElement(
           'tr',
           null,
-          React.createElement('th', null, 'JobID'),
+          sortableTh('JobID', 'job'),
           React.createElement('th', null, 'JobName'),
           React.createElement('th', null, 'Partition'),
-          React.createElement('th', null, 'Start'),
-          React.createElement('th', null, 'End'),
-          React.createElement('th', null, 'Elapsed'),
+          sortableTh('Start', 'start'),
+          sortableTh('End', 'end'),
+          sortableTh('Elapsed', 'elapsed'),
           React.createElement('th', null, 'ReqTRES'),
           React.createElement('th', null, 'AllocTRES'),
           React.createElement('th', null, 'State'),
-          React.createElement('th', null, 'Core Hours'),
-          React.createElement(
-            'th',
-            { className: 'clickable', onClick: toggleSort },
-            '$ Cost'
-          )
+          sortableTh('Core Hours', 'core_hours'),
+          sortableTh('$ Cost', 'cost')
         )
       ),
       React.createElement(
@@ -625,6 +664,14 @@ function SuccessFailChart({ data }) {
 }
 
 function Summary({ summary, details = [], daily = [], monthly = [], yearly = [] }) {
+  if (!summary) {
+    return React.createElement(
+      'div',
+      { className: 'empty-state' },
+      React.createElement('h3', null, 'No billing data available'),
+      React.createElement('p', null, 'No jobs were found for the selected period. This could mean no jobs ran, or the database connection could not be established.')
+    );
+  }
   const sparklineData = daily.map(d => d.core_hours);
   const gpuSparklineData = daily.map(d => d.gpu_hours || 0);
   const ratio = summary.projected_revenue
@@ -741,6 +788,14 @@ function UserDetails({ users }) {
   function toggle(user) {
     setExpanded(prev => (prev === user ? null : user));
   }
+  if (!users || users.length === 0) {
+    return React.createElement(
+      'div',
+      { className: 'empty-state' },
+      React.createElement('h3', null, 'No billing data available'),
+      React.createElement('p', null, 'No jobs were found for the selected period. This could mean no jobs ran, or the database connection could not be established.')
+    );
+  }
   return React.createElement(
     'table',
     { className: 'users-table' },
@@ -822,6 +877,13 @@ function Details({
         userList = userList.filter(u => u.user === filters.user);
         if (!userList.length) return null;
       }
+      if (filters.partition) {
+        userList = userList.map(u => ({
+          ...u,
+          jobs: (u.jobs || []).filter(j => j.partition === filters.partition)
+        })).filter(u => u.jobs && u.jobs.length > 0);
+        if (!userList.length) return null;
+      }
       return { ...d, users: userList };
     })
     .filter(Boolean);
@@ -896,35 +958,52 @@ function Details({
       { core: 0, gpu: 0, cost: 0 }
     );
     const rate = totals.core ? totals.cost / totals.core : 0;
+    const paymentTermsDays = institutionProfile.paymentTermsDays || 30;
+    const dueDateMs = Date.now() + paymentTermsDays * 24 * 60 * 60 * 1000;
     const invoiceData = {
-      invoice_number: `INV-${Date.now()}`,
-      date_issued: new Date().toLocaleDateString(),
+      invoice_number: `INV-${new Date().getFullYear()}-${String(Date.now()).slice(-6)}`,
+      date_issued: new Date().toLocaleDateString('en-US', { year: 'numeric', month: 'long', day: 'numeric' }),
       fiscal_year: new Date().getFullYear().toString(),
-      due_date: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toLocaleDateString(),
+      due_date: new Date(dueDateMs).toLocaleDateString('en-US', { year: 'numeric', month: 'long', day: 'numeric' }),
+      payment_terms: institutionProfile.paymentTerms || `Net ${paymentTermsDays}`,
+      period: month || '',
       items: [
         {
-          description: 'HPC Compute Hours',
-          period: month || '',
-          qty_units: `${totals.core.toFixed(2)} CPU Hours`,
-          rate: `$${rate.toFixed(2)}`,
-          amount: `$${(rate * totals.core).toFixed(2)}`
+          description: 'CPU Core-Hours',
+          qty: totals.core,
+          rate: rate,
+          amount: rate * totals.core
         },
         {
-          description: 'GPU Usage',
-          period: month || '',
-          qty_units: `${totals.gpu.toFixed(2)} GPU Hours`,
-          rate: `$${rate.toFixed(2)}`,
-          amount: `$${(rate * totals.gpu).toFixed(2)}`
+          description: 'GPU Hours',
+          qty: totals.gpu,
+          rate: rate,
+          amount: rate * totals.gpu
         }
       ],
       subtotal: totals.cost,
+      discount: 0,
       tax: 0,
       total_due: totals.cost,
+      institution: {
+        name: institutionProfile.institutionName || '',
+        abbreviation: institutionProfile.institutionAbbreviation || '',
+        department: institutionProfile.departmentName || '',
+        address: institutionProfile.streetAddress || '',
+        city: institutionProfile.city || '',
+        state: institutionProfile.state || '',
+        postal: institutionProfile.postalCode || '',
+        country: institutionProfile.country || '',
+        contact: institutionProfile.primaryContact || {}
+      },
+      logo: institutionProfile.logo || '',
       bank_info: institutionProfile.bankInfo && institutionProfile.bankInfo.trim()
         ? institutionProfile.bankInfo.split('\n').map(l => l.trim()).filter(Boolean)
         : ['(Bank information not configured — update Institution Profile)'],
-      notes:
-        'Thank you for your prompt payment. For questions regarding this invoice, please contact our office.'
+      payment_terms_text: institutionProfile.paymentTerms || `Net ${paymentTermsDays}`,
+      notes: institutionProfile.notes && institutionProfile.notes.trim()
+        ? institutionProfile.notes
+        : 'Thank you for your prompt payment. For questions regarding this invoice, please contact our office.'
     };
     try {
       setError(null);
@@ -968,6 +1047,15 @@ function Details({
       console.error(e);
       setError(e.message || String(e));
     }
+  }
+
+  if (!details || details.length === 0) {
+    return React.createElement(
+      'div',
+      { className: 'empty-state' },
+      React.createElement('h3', null, 'No billing data available'),
+      React.createElement('p', null, 'No jobs were found for the selected period. This could mean no jobs ran, or the database connection could not be established.')
+    );
   }
 
   return React.createElement(
@@ -1111,6 +1199,7 @@ function InstitutionProfile() {
   const [initialProfile, setInitialProfile] = useState(profile);
   const [status, setStatus] = useState(null);
   const [error, setError] = useState(null);
+  const [fieldErrors, setFieldErrors] = useState({});
   const baseDir = PLUGIN_BASE;
 
   useEffect(() => {
@@ -1181,9 +1270,32 @@ function InstitutionProfile() {
     setProfile(initialProfile);
     setStatus(null);
     setError(null);
+    setFieldErrors({});
   }
 
   async function save() {
+    const required = {
+      institutionName: 'Institution Name',
+      streetAddress: 'Street Address',
+      city: 'City',
+      postalCode: 'Postal Code'
+    };
+    const errs = {};
+    Object.entries(required).forEach(([field, label]) => {
+      if (!profile[field] || !String(profile[field]).trim()) {
+        errs[field] = `${label} is required`;
+      }
+    });
+    // state is a select so treat empty string as missing
+    if (!profile.state || !String(profile.state).trim()) {
+      errs.state = 'State/Province is required';
+    }
+    if (Object.keys(errs).length) {
+      setFieldErrors(errs);
+      setError('Please fill in all required fields before saving.');
+      return;
+    }
+    setFieldErrors({});
     try {
       setStatus(null);
       setError(null);
@@ -1257,7 +1369,6 @@ function InstitutionProfile() {
     'Wisconsin',
     'Wyoming'
   ];
-  const countries = ['USA', 'Canada', 'Mexico', 'United Kingdom', 'Germany'];
   const months = [
     'January',
     'February',
@@ -1314,9 +1425,12 @@ function InstitutionProfile() {
           React.createElement('input', {
             type: 'text',
             value: profile.institutionName,
+            style: fieldErrors.institutionName ? { borderColor: 'red' } : undefined,
             onChange: e => update('institutionName', e.target.value)
           })
-        )
+        ),
+        fieldErrors.institutionName &&
+          React.createElement('span', { className: 'field-error' }, fieldErrors.institutionName)
       ),
       React.createElement(
         'div',
@@ -1497,9 +1611,12 @@ function InstitutionProfile() {
           React.createElement('input', {
             type: 'text',
             value: profile.streetAddress,
+            style: fieldErrors.streetAddress ? { borderColor: 'red' } : undefined,
             onChange: e => update('streetAddress', e.target.value)
           })
-        )
+        ),
+        fieldErrors.streetAddress &&
+          React.createElement('span', { className: 'field-error' }, fieldErrors.streetAddress)
       ),
       React.createElement(
         'div',
@@ -1513,9 +1630,12 @@ function InstitutionProfile() {
           React.createElement('input', {
             type: 'text',
             value: profile.city,
+            style: fieldErrors.city ? { borderColor: 'red' } : undefined,
             onChange: e => update('city', e.target.value)
           })
-        )
+        ),
+        fieldErrors.city &&
+          React.createElement('span', { className: 'field-error' }, fieldErrors.city)
       ),
       React.createElement(
         'div',
@@ -1524,14 +1644,21 @@ function InstitutionProfile() {
           'label',
           null,
           'State/Province',
+          React.createElement('span', { className: 'required' }, '*'),
           ': ',
           React.createElement(
             'select',
-            { value: profile.state, onChange: e => update('state', e.target.value) },
+            {
+              value: profile.state,
+              style: fieldErrors.state ? { borderColor: 'red' } : undefined,
+              onChange: e => update('state', e.target.value)
+            },
             React.createElement('option', { value: '' }, 'Select...'),
             states.map(s => React.createElement('option', { key: s, value: s }, s))
           )
-        )
+        ),
+        fieldErrors.state &&
+          React.createElement('span', { className: 'field-error' }, fieldErrors.state)
       ),
       React.createElement(
         'div',
@@ -1545,9 +1672,12 @@ function InstitutionProfile() {
           React.createElement('input', {
             type: 'text',
             value: profile.postalCode,
+            style: fieldErrors.postalCode ? { borderColor: 'red' } : undefined,
             onChange: e => update('postalCode', e.target.value)
           })
-        )
+        ),
+        fieldErrors.postalCode &&
+          React.createElement('span', { className: 'field-error' }, fieldErrors.postalCode)
       ),
       React.createElement(
         'div',
@@ -1557,11 +1687,11 @@ function InstitutionProfile() {
           null,
           'Country',
           ': ',
-          React.createElement(
-            'select',
-            { value: profile.country, onChange: e => update('country', e.target.value) },
-            countries.map(c => React.createElement('option', { key: c, value: c }, c))
-          )
+          React.createElement('input', {
+            type: 'text',
+            value: profile.country,
+            onChange: e => update('country', e.target.value)
+          })
         )
       ),
       React.createElement(
@@ -2052,10 +2182,11 @@ function App() {
       : data.details || [];
   }, [data, view]);
   const [showErrorDetails, setShowErrorDetails] = useState(false);
-  const monthOptions = Array.from(
-    { length: now.getMonth() + 1 },
-    (_, i) => `${now.getFullYear()}-${String(i + 1).padStart(2, '0')}`
-  );
+  const monthOptions = [];
+  for (let i = 0; i < 24; i++) {
+    const d = new Date(now.getFullYear(), now.getMonth() - i, 1);
+    monthOptions.push(`${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`);
+  }
 
   return React.createElement(
     'div',

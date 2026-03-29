@@ -254,3 +254,26 @@ nav button:hover {
   flex: 1;
   min-width: 300px;
 }
+
+.empty-state {
+  text-align: center;
+  padding: 3em 1em;
+  color: var(--pf-global--palette--black-600);
+}
+
+.empty-state h3 {
+  margin-bottom: 0.5em;
+  font-size: 1.2em;
+}
+
+.empty-state p {
+  margin: 0;
+  font-size: 0.95em;
+}
+
+.field-error {
+  display: block;
+  color: var(--pf-global--danger-color--100);
+  font-size: 0.8em;
+  margin-top: 0.2em;
+}

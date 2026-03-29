@@ -1,10 +1,13 @@
 #!/usr/bin/env python3
-"""Generate a PDF invoice for recharge services.
+"""Generate a professional PDF invoice for recharge services.
 
 Reads invoice information from JSON provided on standard input and writes the
-resulting PDF as a base64 encoded string to standard output. Institution
-profile details are pulled from ``institution.json`` in the same directory to
-populate billing information.
+resulting PDF as a base64 encoded string to standard output.
+
+The JSON payload is expected to include a top-level ``institution`` object with
+contact/address fields and an optional ``logo`` field containing a base64
+data URL. Legacy callers that pass ``bank_info`` and ``notes`` directly are
+still supported.
 """
 import base64
 import io
@@ -12,208 +15,552 @@ import json
 import os
 import sys
 import logging
+import tempfile
 from datetime import datetime
 
-# Reportlab is required for PDF generation. If it's missing, emit a clear
-# error message on stderr so callers can surface the failure to users.
 try:
     from reportlab.lib import colors
-    from reportlab.lib.enums import TA_RIGHT
+    from reportlab.lib.enums import TA_RIGHT, TA_CENTER, TA_LEFT
     from reportlab.lib.pagesizes import LETTER
     from reportlab.lib.styles import ParagraphStyle, getSampleStyleSheet
+    from reportlab.lib.units import inch
     from reportlab.platypus import (
         SimpleDocTemplate,
         Paragraph,
         Spacer,
         Table,
         TableStyle,
+        HRFlowable,
+        Image,
+        KeepTogether,
     )
-except ModuleNotFoundError as exc:  # pragma: no cover - exercised via JS
+    from reportlab.lib.utils import ImageReader
+except ModuleNotFoundError as exc:  # pragma: no cover
     print(str(exc), file=sys.stderr)
     sys.exit(1)
 
 
-def _load_profile(base_dir):
-    """Load institution profile information."""
-    path = os.path.join(base_dir, "institution.json")
+# ---------------------------------------------------------------------------
+# Colour palette
+# ---------------------------------------------------------------------------
+COLOR_HEADER_BG = colors.HexColor("#1a1a2e")   # dark navy header
+COLOR_HEADER_FG = colors.white
+COLOR_ALT_ROW = colors.HexColor("#f5f7fa")     # subtle alternating row
+COLOR_BORDER = colors.HexColor("#d0d5dd")
+COLOR_TOTAL_BG = colors.HexColor("#eef2ff")    # light blue for total row
+COLOR_MUTED = colors.HexColor("#6b7280")
+COLOR_RULE = colors.HexColor("#e5e7eb")
+
+PAGE_W, PAGE_H = LETTER
+MARGIN = 0.6 * inch
+CONTENT_W = PAGE_W - 2 * MARGIN
+
+
+# ---------------------------------------------------------------------------
+# Number formatting helpers
+# ---------------------------------------------------------------------------
+def _fmt_num(val, decimals=2):
+    """Format a number with thousands separators."""
     try:
-        with open(path, "r", encoding="utf-8") as fh:
-            return json.load(fh)
-    except FileNotFoundError:
-        return {}
-    except json.JSONDecodeError as exc:
-        logging.error("Failed to parse %s: %s", path, exc)
-        raise
-    except OSError as exc:
-        logging.error("Unable to read %s: %s", path, exc)
-        raise
+        f = float(val)
+    except (TypeError, ValueError):
+        return str(val)
+    fmt = f"{f:,.{decimals}f}"
+    return fmt
 
 
-def _profile_sections(profile):
-    """Construct From and To sections from the profile."""
-    contact = profile.get("primaryContact", {})
-    address_line = profile.get("streetAddress", "")
-    city = profile.get("city", "")
-    state = profile.get("state", "")
-    postal = profile.get("postalCode", "")
-    country = profile.get("country", "")
-    city_state_postal = f"{city}, {state} {postal}".strip(', ')
-
-    from_info = [
-        profile.get("departmentName") or profile.get("institutionName", ""),
-        address_line,
-        city_state_postal,
-        country,
-        f"Phone: {contact.get('phone', '')}",
-        f"Email: {contact.get('email', '')}"
-    ]
-
-    to_info = [
-        profile.get("institutionName", ""),
-        profile.get("institutionAbbreviation", ""),
-        profile.get("campusDivision", ""),
-        address_line,
-        city_state_postal,
-        country,
-        f"Primary Contact: {contact.get('fullName', '')}, {contact.get('title', '')}",
-        f"Email: {contact.get('email', '')} | Phone: {contact.get('phone', '')}"
-    ]
-
-    # Remove empty lines
-    return ([line for line in from_info if line.strip()],
-            [line for line in to_info if line.strip()])
+def _fmt_currency(val):
+    """Format a number as currency with $ prefix."""
+    return f"${_fmt_num(val, 2)}"
 
 
-def _header_elements(invoice_data, styles):
-    """Return flowables for the invoice header section."""
-    elements = [
-        Paragraph("Recharge Services Invoice", styles["Heading"]),
-        Spacer(1, 12),
-    ]
-
-    header_table_data = [
-        [
-            f"Invoice Number: {invoice_data['invoice_number']}",
-            f"Date Issued: {invoice_data['date_issued']}",
-        ],
-        [
-            f"Fiscal Year: {invoice_data['fiscal_year']}",
-            f"Due Date: {invoice_data['due_date']}",
-        ],
-    ]
-    header_table = Table(header_table_data, colWidths=[250, 250])
-    elements.extend([header_table, Spacer(1, 20)])
-
-    elements.append(Paragraph("<b>From (Billed By)</b>", styles["SubHeading"]))
-    for line in invoice_data["from_info"]:
-        elements.append(Paragraph(line, styles["Normal"]))
-    elements.append(Spacer(1, 12))
-
-    elements.append(Paragraph("<b>To (Billed To)</b>", styles["SubHeading"]))
-    for line in invoice_data["to_info"]:
-        elements.append(Paragraph(line, styles["Normal"]))
-    elements.append(Spacer(1, 20))
-
-    return elements
+# ---------------------------------------------------------------------------
+# Logo handling
+# ---------------------------------------------------------------------------
+def _decode_logo(data_url):
+    """Decode a base64 data URL to a temporary file path, or return None."""
+    if not data_url or not data_url.startswith("data:"):
+        return None
+    try:
+        # data URL format: data:<mime>;base64,<data>
+        header, encoded = data_url.split(",", 1)
+        raw = base64.b64decode(encoded)
+        suffix = ".png"
+        if "jpeg" in header or "jpg" in header:
+            suffix = ".jpg"
+        elif "gif" in header:
+            suffix = ".gif"
+        tmp = tempfile.NamedTemporaryFile(delete=False, suffix=suffix)
+        tmp.write(raw)
+        tmp.close()
+        return tmp.name
+    except Exception as exc:
+        logging.warning("Could not decode logo: %s", exc)
+        return None
 
 
-def _table_elements(invoice_data, styles):
-    """Return flowables for the invoice summary table."""
-    elements = [Paragraph("<b>Invoice Summary</b>", styles["SubHeading"])]
-    table_data = [["Description", "Billing Period", "Qty / Units", "Rate", "Amount"]]
-    for item in invoice_data["items"]:
-        table_data.append(
-            [
-                item["description"],
-                item["period"],
-                item["qty_units"],
-                item["rate"],
-                item["amount"],
-            ]
-        )
-    table_data += [
-        ["", "", "", "<b>Subtotal</b>", f"${invoice_data['subtotal']:.2f}"],
-        ["", "", "", "<b>Tax</b>", f"${invoice_data['tax']:.2f}"],
-        ["", "", "", "<b>Total Due</b>", f"<b>${invoice_data['total_due']:.2f}</b>"],
-    ]
-    table = Table(table_data, colWidths=[180, 120, 90, 70, 70])
-    table.setStyle(
-        TableStyle(
-            [
-                ("BACKGROUND", (0, 0), (-1, 0), colors.lightgrey),
-                ("GRID", (0, 0), (-1, -1), 0.25, colors.grey),
-                ("ALIGN", (2, 0), (-1, -1), "RIGHT"),
-                ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
-                ("FONTNAME", (-2, -3), (-1, -1), "Helvetica-Bold"),
-            ]
-        )
+# ---------------------------------------------------------------------------
+# Style factory
+# ---------------------------------------------------------------------------
+def _make_styles():
+    base = getSampleStyleSheet()
+    styles = {}
+
+    styles["Normal"] = ParagraphStyle(
+        "Normal",
+        parent=base["Normal"],
+        fontSize=9,
+        leading=13,
+        textColor=colors.HexColor("#374151"),
     )
-    elements.extend([table, Spacer(1, 20)])
-    return elements
-
-
-def _note_elements(invoice_data, styles):
-    """Return flowables for payment instructions and notes."""
-    elements = [Paragraph("Payment Instructions", styles["SubHeading"])]
-    for line in invoice_data["bank_info"]:
-        elements.append(Paragraph(line, styles["Normal"]))
-    elements.append(Spacer(1, 20))
-
-    elements.append(Paragraph("Notes", styles["SubHeading"]))
-    elements.append(Paragraph(invoice_data["notes"], styles["Normal"]))
-    elements.append(Spacer(1, 20))
-
-    elements.append(
-        Paragraph(
-            "Generated by Recharge Management System on "
-            + datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-            + ". Based on usage records from Monthly Summary Reports and Detailed Transactions modules.",
-            styles["Normal"],
-        )
+    styles["Small"] = ParagraphStyle(
+        "Small",
+        parent=base["Normal"],
+        fontSize=7.5,
+        leading=11,
+        textColor=COLOR_MUTED,
     )
+    styles["BillTo"] = ParagraphStyle(
+        "BillTo",
+        parent=base["Normal"],
+        fontSize=9,
+        leading=13,
+        textColor=colors.HexColor("#374151"),
+    )
+    styles["Label"] = ParagraphStyle(
+        "Label",
+        parent=base["Normal"],
+        fontSize=7,
+        leading=10,
+        textColor=COLOR_MUTED,
+        spaceAfter=2,
+    )
+    styles["SectionHead"] = ParagraphStyle(
+        "SectionHead",
+        parent=base["Normal"],
+        fontSize=8,
+        leading=11,
+        fontName="Helvetica-Bold",
+        textColor=COLOR_MUTED,
+        spaceAfter=4,
+    )
+    styles["InvoiceTitle"] = ParagraphStyle(
+        "InvoiceTitle",
+        parent=base["Normal"],
+        fontSize=26,
+        leading=30,
+        fontName="Helvetica-Bold",
+        textColor=colors.HexColor("#1a1a2e"),
+        alignment=TA_RIGHT,
+    )
+    styles["FooterText"] = ParagraphStyle(
+        "FooterText",
+        parent=base["Normal"],
+        fontSize=7,
+        leading=10,
+        textColor=COLOR_MUTED,
+        alignment=TA_CENTER,
+    )
+    return styles
+
+
+# ---------------------------------------------------------------------------
+# Header block: logo + INVOICE title + meta grid
+# ---------------------------------------------------------------------------
+def _build_header(invoice_data, styles, logo_path):
+    """Return flowables for the top header block."""
+    institution = invoice_data.get("institution", {})
+    dept = institution.get("department") or institution.get("name", "")
+    address_parts = [
+        institution.get("address", ""),
+        ", ".join(filter(None, [institution.get("city", ""), institution.get("state", "")])),
+        " ".join(filter(None, [institution.get("postal", ""), institution.get("country", "")])),
+    ]
+    address_lines = [p for p in address_parts if p.strip()]
+
+    contact = institution.get("contact", {})
+    contact_lines = [
+        contact.get("email", ""),
+        contact.get("phone", ""),
+    ]
+
+    # Left column: logo + from address
+    left_paras = []
+    if logo_path:
+        try:
+            img = Image(logo_path, width=1.5 * inch, height=0.6 * inch)
+            img.hAlign = "LEFT"
+            left_paras.append(img)
+            left_paras.append(Spacer(1, 6))
+        except Exception as exc:
+            logging.warning("Could not embed logo: %s", exc)
+
+    left_paras.append(Paragraph("<b>" + (dept or "Your Institution") + "</b>", styles["Normal"]))
+    for line in address_lines:
+        if line.strip():
+            left_paras.append(Paragraph(line, styles["Normal"]))
+    for line in contact_lines:
+        if line.strip():
+            left_paras.append(Paragraph(line, styles["Small"]))
+
+    # Right column: INVOICE title + meta
+    inv_num = invoice_data.get("invoice_number", "")
+    date_issued = invoice_data.get("date_issued", "")
+    due_date = invoice_data.get("due_date", "")
+    period = invoice_data.get("period", "")
+    payment_terms = invoice_data.get("payment_terms", "")
+
+    right_paras = [
+        Paragraph("INVOICE", styles["InvoiceTitle"]),
+        Spacer(1, 8),
+    ]
+
+    meta_rows = [
+        ("Invoice #:", inv_num),
+        ("Date:", date_issued),
+        ("Due Date:", due_date),
+    ]
+    if period:
+        meta_rows.append(("Period:", period))
+    if payment_terms:
+        meta_rows.append(("Terms:", payment_terms))
+
+    meta_label_style = ParagraphStyle(
+        "MetaLabel",
+        parent=styles["Normal"],
+        fontSize=8,
+        textColor=COLOR_MUTED,
+        alignment=TA_RIGHT,
+    )
+    meta_val_style = ParagraphStyle(
+        "MetaVal",
+        parent=styles["Normal"],
+        fontSize=8,
+        fontName="Helvetica-Bold",
+        alignment=TA_RIGHT,
+    )
+    for label, val in meta_rows:
+        right_paras.append(
+            Table(
+                [[Paragraph(label, meta_label_style), Paragraph(val, meta_val_style)]],
+                colWidths=[0.9 * inch, 1.5 * inch],
+                style=TableStyle([
+                    ("VALIGN", (0, 0), (-1, -1), "TOP"),
+                    ("LEFTPADDING", (0, 0), (-1, -1), 0),
+                    ("RIGHTPADDING", (0, 0), (-1, -1), 0),
+                    ("BOTTOMPADDING", (0, 0), (-1, -1), 2),
+                    ("TOPPADDING", (0, 0), (-1, -1), 0),
+                ]),
+            )
+        )
+
+    col_left_w = CONTENT_W * 0.55
+    col_right_w = CONTENT_W * 0.45
+
+    header_table = Table(
+        [[left_paras, right_paras]],
+        colWidths=[col_left_w, col_right_w],
+        style=TableStyle([
+            ("VALIGN", (0, 0), (-1, -1), "TOP"),
+            ("LEFTPADDING", (0, 0), (-1, -1), 0),
+            ("RIGHTPADDING", (0, 0), (-1, -1), 0),
+            ("TOPPADDING", (0, 0), (-1, -1), 0),
+            ("BOTTOMPADDING", (0, 0), (-1, -1), 0),
+        ]),
+    )
+
+    return [header_table, Spacer(1, 14)]
+
+
+# ---------------------------------------------------------------------------
+# Bill To block
+# ---------------------------------------------------------------------------
+def _build_bill_to(invoice_data, styles):
+    """Return flowables for the Bill To section."""
+    institution = invoice_data.get("institution", {})
+    contact = institution.get("contact", {})
+
+    bill_to_lines = []
+    name_parts = [contact.get("fullName", ""), contact.get("title", "")]
+    name_str = ", ".join(p for p in name_parts if p)
+    if name_str:
+        bill_to_lines.append(name_str)
+
+    dept = institution.get("department") or institution.get("name", "")
+    if dept:
+        bill_to_lines.append(dept)
+
+    address_parts = [
+        institution.get("address", ""),
+        ", ".join(filter(None, [institution.get("city", ""), institution.get("state", "")])),
+        " ".join(filter(None, [institution.get("postal", ""), institution.get("country", "")])),
+    ]
+    for p in address_parts:
+        if p.strip():
+            bill_to_lines.append(p)
+
+    email = contact.get("email", "")
+    if email:
+        bill_to_lines.append(email)
+
+    content_paras = [Paragraph("<b>BILL TO</b>", styles["SectionHead"])]
+    for line in bill_to_lines:
+        content_paras.append(Paragraph(line, styles["BillTo"]))
+
+    # Wrap in a light box
+    bill_table = Table(
+        [[content_paras]],
+        colWidths=[CONTENT_W * 0.5],
+        style=TableStyle([
+            ("BOX", (0, 0), (-1, -1), 0.5, COLOR_BORDER),
+            ("BACKGROUND", (0, 0), (-1, -1), COLOR_ALT_ROW),
+            ("LEFTPADDING", (0, 0), (-1, -1), 10),
+            ("RIGHTPADDING", (0, 0), (-1, -1), 10),
+            ("TOPPADDING", (0, 0), (-1, -1), 8),
+            ("BOTTOMPADDING", (0, 0), (-1, -1), 8),
+        ]),
+    )
+    return [bill_table, Spacer(1, 16)]
+
+
+# ---------------------------------------------------------------------------
+# Line-items table
+# ---------------------------------------------------------------------------
+def _build_items_table(invoice_data, styles):
+    """Return flowables for the invoice line-items table."""
+    col_desc_w = CONTENT_W * 0.40
+    col_qty_w = CONTENT_W * 0.18
+    col_rate_w = CONTENT_W * 0.18
+    col_amt_w = CONTENT_W * 0.24
+
+    header_style = ParagraphStyle(
+        "TblHeader",
+        parent=styles["Normal"],
+        fontName="Helvetica-Bold",
+        fontSize=8,
+        textColor=COLOR_HEADER_FG,
+    )
+    cell_style = ParagraphStyle(
+        "TblCell",
+        parent=styles["Normal"],
+        fontSize=9,
+    )
+    num_style = ParagraphStyle(
+        "TblNum",
+        parent=styles["Normal"],
+        fontSize=9,
+        alignment=TA_RIGHT,
+    )
+
+    table_data = [[
+        Paragraph("Description", header_style),
+        Paragraph("Quantity", header_style),
+        Paragraph("Rate", header_style),
+        Paragraph("Amount", header_style),
+    ]]
+
+    items = invoice_data.get("items", [])
+    for item in items:
+        qty = item.get("qty", 0)
+        rate = item.get("rate", 0)
+        amount = item.get("amount", 0)
+        # Support legacy string format from old callers
+        qty_str = _fmt_num(qty) if isinstance(qty, (int, float)) else str(qty)
+        rate_str = _fmt_currency(rate) if isinstance(rate, (int, float)) else str(rate)
+        amt_str = _fmt_currency(amount) if isinstance(amount, (int, float)) else str(amount)
+        table_data.append([
+            Paragraph(item.get("description", ""), cell_style),
+            Paragraph(qty_str, num_style),
+            Paragraph(rate_str, num_style),
+            Paragraph(amt_str, num_style),
+        ])
+
+    # Subtotal / discount / total rows
+    subtotal = invoice_data.get("subtotal", 0)
+    discount = invoice_data.get("discount", 0)
+    tax = invoice_data.get("tax", 0)
+    total_due = invoice_data.get("total_due", subtotal - discount + tax)
+
+    empty_cell = Paragraph("", cell_style)
+
+    sub_style = ParagraphStyle("SubLbl", parent=styles["Normal"], fontSize=9, alignment=TA_RIGHT)
+    sub_val_style = ParagraphStyle("SubVal", parent=styles["Normal"], fontSize=9, alignment=TA_RIGHT)
+    tot_style = ParagraphStyle(
+        "TotLbl", parent=styles["Normal"], fontSize=10, fontName="Helvetica-Bold", alignment=TA_RIGHT
+    )
+    tot_val_style = ParagraphStyle(
+        "TotVal", parent=styles["Normal"], fontSize=10, fontName="Helvetica-Bold", alignment=TA_RIGHT
+    )
+
+    table_data.append([empty_cell, empty_cell, Paragraph("Subtotal", sub_style), Paragraph(_fmt_currency(subtotal), sub_val_style)])
+    if discount:
+        disc_str = f"-{_fmt_currency(discount)}"
+        table_data.append([empty_cell, empty_cell, Paragraph("Discount", sub_style), Paragraph(disc_str, sub_val_style)])
+    if tax:
+        table_data.append([empty_cell, empty_cell, Paragraph("Tax", sub_style), Paragraph(_fmt_currency(tax), sub_val_style)])
+    table_data.append([empty_cell, empty_cell, Paragraph("Total Due", tot_style), Paragraph(_fmt_currency(total_due), tot_val_style)])
+
+    n_items = len(items)
+    n_rows = len(table_data)
+
+    # Build row style commands
+    row_styles = [
+        # Header row
+        ("BACKGROUND", (0, 0), (-1, 0), COLOR_HEADER_BG),
+        ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
+        ("TEXTCOLOR", (0, 0), (-1, 0), COLOR_HEADER_FG),
+        # Grid
+        ("GRID", (0, 0), (-1, n_items), 0.25, COLOR_BORDER),
+        ("LINEABOVE", (0, n_items + 1), (-1, n_items + 1), 0.5, COLOR_BORDER),
+        # Padding
+        ("TOPPADDING", (0, 0), (-1, -1), 6),
+        ("BOTTOMPADDING", (0, 0), (-1, -1), 6),
+        ("LEFTPADDING", (0, 0), (-1, -1), 8),
+        ("RIGHTPADDING", (0, 0), (-1, -1), 8),
+        # Alignment
+        ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
+        # Alternating row colour for data rows (skip header)
+        # Total row background
+        ("BACKGROUND", (2, n_rows - 1), (-1, n_rows - 1), COLOR_TOTAL_BG),
+    ]
+
+    # Alternating data rows
+    for i in range(1, n_items + 1):
+        if i % 2 == 0:
+            row_styles.append(("BACKGROUND", (0, i), (-1, i), COLOR_ALT_ROW))
+
+    table = Table(
+        table_data,
+        colWidths=[col_desc_w, col_qty_w, col_rate_w, col_amt_w],
+        style=TableStyle(row_styles),
+    )
+    return [Paragraph("<b>SERVICES</b>", styles["SectionHead"]), table, Spacer(1, 16)]
+
+
+# ---------------------------------------------------------------------------
+# Payment info + notes section
+# ---------------------------------------------------------------------------
+def _build_footer_sections(invoice_data, styles):
+    """Return flowables for payment info, notes, and separator."""
+    elements = []
+
+    bank_info = invoice_data.get("bank_info", [])
+    notes = invoice_data.get("notes", "")
+
+    left_col = [Paragraph("<b>PAYMENT INFORMATION</b>", styles["SectionHead"])]
+    for line in bank_info:
+        if line.strip():
+            left_col.append(Paragraph(line, styles["Normal"]))
+
+    right_col = [Paragraph("<b>NOTES</b>", styles["SectionHead"])]
+    if notes:
+        right_col.append(Paragraph(notes, styles["Normal"]))
+
+    foot_table = Table(
+        [[left_col, right_col]],
+        colWidths=[CONTENT_W * 0.5, CONTENT_W * 0.5],
+        style=TableStyle([
+            ("VALIGN", (0, 0), (-1, -1), "TOP"),
+            ("LEFTPADDING", (0, 0), (-1, -1), 0),
+            ("RIGHTPADDING", (0, 0), (0, -1), 16),
+            ("RIGHTPADDING", (1, 0), (-1, -1), 0),
+            ("TOPPADDING", (0, 0), (-1, -1), 0),
+            ("BOTTOMPADDING", (0, 0), (-1, -1), 0),
+        ]),
+    )
+    elements.append(foot_table)
     return elements
 
 
+# ---------------------------------------------------------------------------
+# Page footer (page number + generation info)
+# ---------------------------------------------------------------------------
+def _page_footer(canvas, doc):
+    """Draw footer on each page."""
+    canvas.saveState()
+    canvas.setFont("Helvetica", 7)
+    canvas.setFillColor(COLOR_MUTED)
+    footer_text = (
+        f"Generated by SlurmLedger  \u00b7  "
+        + datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        + f"  \u00b7  Page {doc.page}"
+    )
+    canvas.drawCentredString(PAGE_W / 2, MARGIN * 0.5, footer_text)
+
+    # Thin rule above footer
+    canvas.setStrokeColor(COLOR_RULE)
+    canvas.setLineWidth(0.5)
+    canvas.line(MARGIN, MARGIN * 0.7, PAGE_W - MARGIN, MARGIN * 0.7)
+    canvas.restoreState()
+
+
+# ---------------------------------------------------------------------------
+# Main generator
+# ---------------------------------------------------------------------------
 def generate_invoice(buffer, invoice_data):
     """Create the PDF invoice into ``buffer``."""
+    logo_path = _decode_logo(invoice_data.get("logo", ""))
+    styles = _make_styles()
+
     doc = SimpleDocTemplate(
         buffer,
         pagesize=LETTER,
-        rightMargin=40,
-        leftMargin=40,
-        topMargin=40,
-        bottomMargin=40,
+        rightMargin=MARGIN,
+        leftMargin=MARGIN,
+        topMargin=MARGIN,
+        bottomMargin=MARGIN * 1.4,  # extra bottom margin for footer
     )
-    styles = getSampleStyleSheet()
-    styles.add(ParagraphStyle(name="RightAlign", parent=styles["Normal"], alignment=TA_RIGHT))
-    styles.add(ParagraphStyle(name="Heading", parent=styles["Heading1"], fontSize=16, spaceAfter=10))
-    styles.add(ParagraphStyle(name="SubHeading", parent=styles["Heading2"], fontSize=12, spaceAfter=8))
 
     elements = []
-    elements.extend(_header_elements(invoice_data, styles))
-    elements.extend(_table_elements(invoice_data, styles))
-    elements.extend(_note_elements(invoice_data, styles))
+    elements.extend(_build_header(invoice_data, styles, logo_path))
+    elements.append(HRFlowable(width=CONTENT_W, thickness=0.5, color=COLOR_BORDER, spaceAfter=12))
+    elements.extend(_build_bill_to(invoice_data, styles))
+    elements.extend(_build_items_table(invoice_data, styles))
+    elements.append(HRFlowable(width=CONTENT_W, thickness=0.5, color=COLOR_BORDER, spaceBefore=4, spaceAfter=12))
+    elements.extend(_build_footer_sections(invoice_data, styles))
 
-    doc.build(elements)
+    doc.build(elements, onFirstPage=_page_footer, onLaterPages=_page_footer)
+
+    # Clean up temp logo file
+    if logo_path:
+        try:
+            os.unlink(logo_path)
+        except OSError:
+            pass
 
 
 def main():
-    base_dir = os.path.dirname(os.path.abspath(__file__))
-    try:
-        profile = _load_profile(base_dir)
-    except json.JSONDecodeError as exc:
-        print(f"Invalid institution profile: {exc}", file=sys.stderr)
-        sys.exit(1)
-    except OSError as exc:
-        print(f"Unable to read institution profile: {exc}", file=sys.stderr)
-        sys.exit(1)
-
     invoice_data = json.load(sys.stdin)
 
-    # Fill in profile-based sections if not provided
-    from_info, to_info = _profile_sections(profile)
-    invoice_data.setdefault("from_info", from_info)
-    invoice_data.setdefault("to_info", to_info)
+    # Legacy fallback: if institution block is missing, try to load from disk
+    if "institution" not in invoice_data:
+        base_dir = os.path.dirname(os.path.abspath(__file__))
+        profile_path = os.path.join(base_dir, "institution.json")
+        try:
+            with open(profile_path, "r", encoding="utf-8") as fh:
+                profile = json.load(fh)
+            contact = profile.get("primaryContact", {})
+            invoice_data["institution"] = {
+                "name": profile.get("institutionName", ""),
+                "abbreviation": profile.get("institutionAbbreviation", ""),
+                "department": profile.get("departmentName", ""),
+                "address": profile.get("streetAddress", ""),
+                "city": profile.get("city", ""),
+                "state": profile.get("state", ""),
+                "postal": profile.get("postalCode", ""),
+                "country": profile.get("country", ""),
+                "contact": contact,
+            }
+            if not invoice_data.get("logo") and profile.get("logo"):
+                invoice_data["logo"] = profile["logo"]
+            if not invoice_data.get("bank_info") and profile.get("bankInfo"):
+                invoice_data["bank_info"] = [
+                    l.strip() for l in profile["bankInfo"].split("\n") if l.strip()
+                ]
+            if not invoice_data.get("notes") and profile.get("notes"):
+                invoice_data["notes"] = profile["notes"]
+        except (FileNotFoundError, json.JSONDecodeError, OSError):
+            invoice_data["institution"] = {}
 
     buffer = io.BytesIO()
     generate_invoice(buffer, invoice_data)
