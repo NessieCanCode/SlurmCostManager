@@ -41,13 +41,14 @@ jobs:
       - name: Python unit tests
         run: |
           pip install pytest==8.3.3 >/dev/null 2>&1
-          PYTHONPATH=src python test/unit/slurmdb_validation.test.py
+          PYTHONPATH=src python -m pytest test/unit/ -v
       - name: Set up Node
         uses: actions/setup-node@v4
         with:
           node-version: '18'
-      - name: Node unit tests
-        run: node test/unit/calculator.test.js
+      - name: JS tests
+        run: |
+          for f in test/unit/*.test.js; do node "$f"; done
 
   integration-tests:
     runs-on: ubuntu-latest
@@ -63,6 +64,33 @@ jobs:
           node-version: '18'
       - name: Run integration tests
         run: make check
+
+  db-integration:
+    name: Database Integration Test
+    runs-on: ubuntu-latest
+    services:
+      mysql:
+        image: mariadb:10.11
+        env:
+          MYSQL_ROOT_PASSWORD: testpass
+          MYSQL_DATABASE: slurm_acct_db
+        ports:
+          - 3306:3306
+        options: --health-cmd="mysqladmin ping" --health-interval=10s --health-timeout=5s --health-retries=5
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - run: pip install pymysql reportlab
+      - name: Load test schema
+        run: mysql -h 127.0.0.1 -u root -ptestpass slurm_acct_db < test/example_slurmdb_for_testing.sql
+      - name: Run integration test
+        run: |
+          python3 src/slurmdb.py --host 127.0.0.1 --user root --password testpass \
+            --database slurm_acct_db --cluster test_cluster \
+            --start 2024-01-01 --end 2024-12-31 --output - > /dev/null
+          echo "Integration test passed"
 
   security-scan:
     runs-on: ubuntu-latest

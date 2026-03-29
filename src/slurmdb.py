@@ -719,6 +719,66 @@ class SlurmDB:
             for r in rows
         ]
 
+    def _compute_allocation_info(
+        self,
+        account: str,
+        used_su: float,
+        rates_cfg: Dict[str, Any],
+    ) -> Dict[str, Any]:
+        """Return allocation tracking fields for *account*.
+
+        Returns a dict with keys: budget_su, used_su, remaining_su,
+        percent_used, alert_level.  When no allocation is configured for the
+        account the budget_su fields are None.
+        """
+        allocations = rates_cfg.get("allocations", {})
+        alloc = allocations.get(account)
+        if alloc is None:
+            return {
+                "budget_su": None,
+                "used_su": round(used_su, 2),
+                "remaining_su": None,
+                "percent_used": None,
+                "alert_level": None,
+            }
+
+        budget = alloc.get("budget_su")
+        if budget is None:
+            return {
+                "budget_su": None,
+                "used_su": round(used_su, 2),
+                "remaining_su": None,
+                "percent_used": None,
+                "alert_level": None,
+            }
+
+        remaining = budget - used_su
+        percent = round(used_su / budget * 100, 1) if budget > 0 else 0.0
+        alert_thresholds = sorted(alloc.get("alerts", [80, 90, 100]))
+        alert_level = None
+        for threshold in reversed(alert_thresholds):
+            if percent >= threshold:
+                if threshold >= 100:
+                    alert_level = "exceeded"
+                elif threshold >= 90:
+                    alert_level = "critical"
+                else:
+                    alert_level = "warning"
+                break
+
+        return {
+            "budget_su": budget,
+            "used_su": round(used_su, 2),
+            "remaining_su": round(remaining, 2),
+            "percent_used": percent,
+            "alert_level": alert_level,
+            "alloc_type": alloc.get("type"),
+            "alloc_period": alloc.get("period"),
+            "start_date": alloc.get("start_date"),
+            "end_date": alloc.get("end_date"),
+            "carryover": alloc.get("carryover"),
+        }
+
     def _load_rates(self, rates_file: Optional[str]) -> Dict[str, Any]:
         path = rates_file or os.path.join(os.path.dirname(__file__), 'rates.json')
         try:
@@ -812,6 +872,9 @@ class SlurmDB:
                             'jobs': jobs,
                         }
                     )
+                alloc_info = self._compute_allocation_info(
+                    account, vals['core_hours'], rates_cfg
+                )
                 details.append(
                     {
                         'account': account,
@@ -819,6 +882,7 @@ class SlurmDB:
                         'gpu_hours': round(vals.get('gpu_hours', 0.0), 2),
                         'cost': round(acct_cost, 2),
                         'users': users,
+                        'allocation': alloc_info,
                     }
                 )
                 total_ch += vals['core_hours']

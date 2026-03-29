@@ -1045,6 +1045,18 @@ function Details({
       URL.revokeObjectURL(url);
       // Record the invoice in the ledger
       await saveInvoiceToLedger({ ...invoiceData, account: filters.account || '' }, totals.cost);
+      // Trigger financial integration webhook for invoice.created
+      if (HAS_COCKPIT) {
+        window.cockpit.spawn(
+          [
+            'python3', `${PLUGIN_BASE}/financial_export.py`,
+            '--event', 'invoice.created',
+            '--invoice-id', invoiceData.invoice_number,
+            '--format', 'webhook'
+          ],
+          { err: 'message' }
+        ).catch(e => console.warn('Webhook trigger failed:', e));
+      }
     } catch (e) {
       console.error(e);
       setError(e.message || String(e));
@@ -1827,14 +1839,692 @@ function InstitutionProfile() {
   );
 }
 
+// ---------------------------------------------------------------------------
+// Allocation helpers
+// ---------------------------------------------------------------------------
+
+function computeAlertLevel(percentUsed, thresholds) {
+  const sorted = (thresholds || [80, 90, 100]).slice().sort((a, b) => b - a);
+  for (const t of sorted) {
+    if (percentUsed >= t) {
+      if (t >= 100) return 'exceeded';
+      if (t >= 90) return 'critical';
+      return 'warning';
+    }
+  }
+  return null;
+}
+
+function AllocationBadge({ alertLevel }) {
+  if (!alertLevel) return null;
+  const colors = {
+    warning: '#d97706',
+    critical: '#dc2626',
+    exceeded: '#7c2d12'
+  };
+  const icons = { warning: '\u26a0\ufe0f', critical: '\ud83d\udd34', exceeded: '\ud83d\udd34' };
+  return React.createElement(
+    'span',
+    {
+      style: {
+        display: 'inline-block',
+        padding: '2px 8px',
+        borderRadius: '12px',
+        backgroundColor: colors[alertLevel] || '#6b7280',
+        color: '#fff',
+        fontSize: '0.75em',
+        fontWeight: 'bold',
+        textTransform: 'uppercase',
+        marginLeft: '4px'
+      }
+    },
+    alertLevel
+  );
+}
+
+function AllocationProgressBar({ percent }) {
+  const clamped = Math.min(100, Math.max(0, percent || 0));
+  const color = clamped >= 100 ? '#7c2d12' : clamped >= 90 ? '#dc2626' : clamped >= 80 ? '#d97706' : '#16a34a';
+  return React.createElement(
+    'div',
+    {
+      style: {
+        background: '#e5e7eb',
+        borderRadius: '4px',
+        height: '8px',
+        width: '120px',
+        display: 'inline-block',
+        verticalAlign: 'middle'
+      }
+    },
+    React.createElement('div', {
+      style: {
+        width: `${clamped}%`,
+        height: '100%',
+        borderRadius: '4px',
+        background: color
+      }
+    })
+  );
+}
+
+// Modal for editing a single allocation entry
+function AllocationModal({ allocation, accountName, onSave, onClose }) {
+  const [form, setForm] = useState(allocation ? { ...allocation } : {
+    type: 'prepaid',
+    budget_su: '',
+    period: 'annual',
+    start_date: '',
+    end_date: '',
+    carryover: false,
+    alerts: [80, 90, 100]
+  });
+  const [alertsText, setAlertsText] = useState(
+    ((allocation && allocation.alerts) || [80, 90, 100]).join(', ')
+  );
+  const [error, setError] = useState(null);
+
+  function update(field, value) {
+    setForm(prev => ({ ...prev, [field]: value }));
+  }
+
+  function handleSave() {
+    const alerts = alertsText.split(',').map(s => parseInt(s.trim(), 10)).filter(n => !isNaN(n));
+    const out = {
+      type: form.type,
+      period: form.period || undefined,
+      start_date: form.start_date || undefined,
+      end_date: form.end_date || undefined,
+      carryover: !!form.carryover,
+      alerts
+    };
+    if (form.type === 'prepaid') {
+      const bsu = parseInt(form.budget_su, 10);
+      if (!Number.isFinite(bsu) || bsu <= 0) {
+        setError('Budget SU must be a positive integer for prepaid allocations');
+        return;
+      }
+      out.budget_su = bsu;
+    } else {
+      out.billing_period = form.billing_period || 'monthly';
+      out.budget_su = form.budget_su ? parseInt(form.budget_su, 10) || null : null;
+    }
+    onSave(accountName, out);
+  }
+
+  return React.createElement(
+    'div',
+    { className: 'modal-overlay', onClick: onClose },
+    React.createElement(
+      'div',
+      {
+        className: 'modal',
+        onClick: e => e.stopPropagation(),
+        style: { maxWidth: '520px', width: '95%' }
+      },
+      React.createElement('h3', null, `${allocation ? 'Edit' : 'Add'} Allocation: ${accountName}`),
+      error && React.createElement('p', { className: 'error' }, error),
+      React.createElement(
+        'div',
+        { style: { marginBottom: '0.75em' } },
+        React.createElement('label', null, 'Type: '),
+        React.createElement(
+          'select',
+          { value: form.type, onChange: e => update('type', e.target.value) },
+          React.createElement('option', { value: 'prepaid' }, 'Prepaid'),
+          React.createElement('option', { value: 'postpaid' }, 'Postpaid')
+        )
+      ),
+      React.createElement(
+        'div',
+        { style: { marginBottom: '0.75em' } },
+        React.createElement('label', null, 'Budget SU (blank = unlimited): '),
+        React.createElement('input', {
+          type: 'number',
+          value: form.budget_su ?? '',
+          onChange: e => update('budget_su', e.target.value),
+          placeholder: 'e.g. 500000'
+        })
+      ),
+      form.type === 'prepaid' && React.createElement(
+        'div',
+        { style: { marginBottom: '0.75em' } },
+        React.createElement('label', null, 'Period: '),
+        React.createElement(
+          'select',
+          { value: form.period || 'annual', onChange: e => update('period', e.target.value) },
+          React.createElement('option', { value: 'annual' }, 'Annual'),
+          React.createElement('option', { value: 'monthly' }, 'Monthly'),
+          React.createElement('option', { value: 'custom' }, 'Custom')
+        )
+      ),
+      form.type === 'postpaid' && React.createElement(
+        'div',
+        { style: { marginBottom: '0.75em' } },
+        React.createElement('label', null, 'Billing Period: '),
+        React.createElement(
+          'select',
+          { value: form.billing_period || 'monthly', onChange: e => update('billing_period', e.target.value) },
+          React.createElement('option', { value: 'monthly' }, 'Monthly'),
+          React.createElement('option', { value: 'quarterly' }, 'Quarterly'),
+          React.createElement('option', { value: 'annual' }, 'Annual')
+        )
+      ),
+      React.createElement(
+        'div',
+        { style: { marginBottom: '0.75em' } },
+        React.createElement('label', null, 'Start Date: '),
+        React.createElement('input', {
+          type: 'date',
+          value: form.start_date || '',
+          onChange: e => update('start_date', e.target.value)
+        })
+      ),
+      React.createElement(
+        'div',
+        { style: { marginBottom: '0.75em' } },
+        React.createElement('label', null, 'End Date: '),
+        React.createElement('input', {
+          type: 'date',
+          value: form.end_date || '',
+          onChange: e => update('end_date', e.target.value)
+        })
+      ),
+      React.createElement(
+        'div',
+        { style: { marginBottom: '0.75em' } },
+        React.createElement('label', null,
+          React.createElement('input', {
+            type: 'checkbox',
+            checked: !!form.carryover,
+            onChange: e => update('carryover', e.target.checked),
+            style: { marginRight: '6px' }
+          }),
+          'Allow carryover into next period'
+        )
+      ),
+      React.createElement(
+        'div',
+        { style: { marginBottom: '0.75em' } },
+        React.createElement('label', null, 'Alert thresholds (%, comma-separated): '),
+        React.createElement('input', {
+          type: 'text',
+          value: alertsText,
+          onChange: e => setAlertsText(e.target.value),
+          placeholder: '80, 90, 100'
+        })
+      ),
+      React.createElement(
+        'div',
+        { style: { display: 'flex', gap: '0.5em', justifyContent: 'flex-end' } },
+        React.createElement('button', { onClick: onClose }, 'Cancel'),
+        React.createElement('button', { onClick: handleSave }, 'Save')
+      )
+    )
+  );
+}
+
+// Allocations sub-tab rendered inside Rates
+function AllocationsTab({ allocations, onAllocationsChange, accounts }) {
+  const [editTarget, setEditTarget] = useState(null); // { account, alloc } | { account: '', alloc: null }
+
+  function handleSave(accountName, alloc) {
+    const updated = { ...allocations, [accountName]: alloc };
+    onAllocationsChange(updated);
+    setEditTarget(null);
+  }
+
+  function handleRemove(accountName) {
+    if (!window.confirm(`Remove allocation for ${accountName}?`)) return;
+    const updated = { ...allocations };
+    delete updated[accountName];
+    onAllocationsChange(updated);
+  }
+
+  const rows = Object.entries(allocations || {});
+
+  return React.createElement(
+    'div',
+    null,
+    React.createElement('h3', null, 'Account Allocations'),
+    React.createElement(
+      'p',
+      { style: { color: '#6b7280', fontSize: '0.9em' } },
+      'Set budget Service Unit (SU) limits and alert thresholds per account. 1 SU = 1 core-hour.'
+    ),
+    React.createElement(
+      'div',
+      { className: 'table-container' },
+      React.createElement(
+        'table',
+        { className: 'rates-table' },
+        React.createElement(
+          'thead',
+          null,
+          React.createElement(
+            'tr',
+            null,
+            React.createElement('th', null, 'Account'),
+            React.createElement('th', null, 'Type'),
+            React.createElement('th', null, 'Budget SU'),
+            React.createElement('th', null, 'Period'),
+            React.createElement('th', null, 'Start'),
+            React.createElement('th', null, 'End'),
+            React.createElement('th', null, 'Carryover'),
+            React.createElement('th', null, 'Alert Thresholds (%)'),
+            React.createElement('th', null)
+          )
+        ),
+        React.createElement(
+          'tbody',
+          null,
+          rows.length === 0
+            ? React.createElement(
+                'tr',
+                null,
+                React.createElement(
+                  'td',
+                  { colSpan: 9, style: { textAlign: 'center', color: '#9ca3af', padding: '1em' } },
+                  'No allocations configured. Click "Add Allocation" to add one.'
+                )
+              )
+            : rows.map(([acct, alloc]) =>
+                React.createElement(
+                  'tr',
+                  { key: acct },
+                  React.createElement('td', null, React.createElement('strong', null, acct)),
+                  React.createElement('td', null, alloc.type || 'prepaid'),
+                  React.createElement('td', null, alloc.budget_su != null ? alloc.budget_su.toLocaleString() : 'Unlimited'),
+                  React.createElement('td', null, alloc.period || alloc.billing_period || ''),
+                  React.createElement('td', null, alloc.start_date || ''),
+                  React.createElement('td', null, alloc.end_date || ''),
+                  React.createElement('td', null, alloc.carryover ? 'Yes' : 'No'),
+                  React.createElement('td', null, (alloc.alerts || []).join(', ')),
+                  React.createElement(
+                    'td',
+                    { style: { whiteSpace: 'nowrap' } },
+                    React.createElement(
+                      'button',
+                      {
+                        className: 'link-btn',
+                        onClick: () => setEditTarget({ account: acct, alloc }),
+                        style: { marginRight: '6px' }
+                      },
+                      'Edit'
+                    ),
+                    React.createElement(
+                      'button',
+                      {
+                        className: 'link-btn',
+                        onClick: () => handleRemove(acct),
+                        style: { color: '#dc2626' }
+                      },
+                      'Remove'
+                    )
+                  )
+                )
+              )
+        )
+      )
+    ),
+    React.createElement(
+      'button',
+      {
+        onClick: () => setEditTarget({ account: '', alloc: null }),
+        style: { marginTop: '0.75em' }
+      },
+      'Add Allocation'
+    ),
+    editTarget && React.createElement(AllocationModal, {
+      allocation: editTarget.alloc,
+      accountName: editTarget.account,
+      onSave: handleSave,
+      onClose: () => setEditTarget(null)
+    })
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Financial Integration UI (Task B3)
+// ---------------------------------------------------------------------------
+
+function FinancialIntegrationTab() {
+  const [fi, setFi] = useState({
+    enabled: false,
+    type: 'none',
+    webhookUrl: '',
+    apiKey: '',
+    chartOfAccounts: {}
+  });
+  const [coaRows, setCoaRows] = useState([]);
+  const [status, setStatus] = useState(null);
+  const [error, setError] = useState(null);
+  const [testing, setTesting] = useState(false);
+  const baseDir = PLUGIN_BASE;
+
+  useEffect(() => {
+    let cancelled = false;
+    async function load() {
+      try {
+        let text;
+        if (window.cockpit && window.cockpit.file) {
+          text = await window.cockpit.file(`${baseDir}/institution.json`).read();
+        } else {
+          const resp = await fetch('institution.json');
+          if (!resp.ok) return;
+          text = await resp.text();
+        }
+        if (cancelled) return;
+        const json = JSON.parse(text);
+        const cfg = json.financialIntegration || {};
+        setFi({
+          enabled: !!cfg.enabled,
+          type: cfg.type || 'none',
+          webhookUrl: cfg.webhookUrl || '',
+          apiKey: cfg.apiKey || '',
+          chartOfAccounts: cfg.chartOfAccounts || {}
+        });
+        const rows = Object.entries(cfg.chartOfAccounts || {}).map(([account, mapping]) => ({
+          account,
+          fund: mapping.fund || '',
+          org: mapping.org || '',
+          account_code: mapping.account || '',
+          program: mapping.program || ''
+        }));
+        setCoaRows(rows);
+      } catch (e) {
+        console.error(e);
+      }
+    }
+    load();
+    return () => { cancelled = true; };
+  }, []);
+
+  function updateCoa(index, field, value) {
+    setCoaRows(prev => prev.map((r, i) => i === index ? { ...r, [field]: value } : r));
+  }
+
+  function addCoaRow() {
+    setCoaRows(prev => [...prev, { account: '', fund: '', org: '', account_code: '', program: '' }]);
+  }
+
+  function removeCoaRow(index) {
+    setCoaRows(prev => prev.filter((_, i) => i !== index));
+  }
+
+  async function save() {
+    try {
+      setError(null);
+      setStatus(null);
+      let text;
+      if (window.cockpit && window.cockpit.file) {
+        text = await window.cockpit.file(`${baseDir}/institution.json`).read();
+      } else {
+        const resp = await fetch('institution.json');
+        text = await resp.text();
+      }
+      const json = JSON.parse(text);
+      const coa = {};
+      coaRows.forEach(r => {
+        if (r.account) {
+          coa[r.account] = {
+            fund: r.fund,
+            org: r.org,
+            account: r.account_code,
+            program: r.program
+          };
+        }
+      });
+      json.financialIntegration = {
+        enabled: fi.enabled,
+        type: fi.type,
+        webhookUrl: fi.webhookUrl,
+        apiKey: fi.apiKey,
+        chartOfAccounts: coa
+      };
+      const out = JSON.stringify(json, null, 2);
+      if (window.cockpit && window.cockpit.file) {
+        await window.cockpit.file(`${baseDir}/institution.json`).replace(out);
+      } else {
+        await fetch('institution.json', {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: out
+        });
+      }
+      setStatus('Saved');
+    } catch (e) {
+      console.error(e);
+      setError('Failed to save: ' + (e.message || String(e)));
+    }
+  }
+
+  async function testConnection() {
+    if (!fi.webhookUrl) {
+      setError('Enter a webhook URL first');
+      return;
+    }
+    try {
+      setTesting(true);
+      setError(null);
+      setStatus(null);
+      if (HAS_COCKPIT) {
+        const result = await window.cockpit.spawn(
+          [
+            'python3', `${PLUGIN_BASE}/financial_export.py`,
+            '--event', 'connection.test',
+            '--invoice-id', 'TEST',
+            '--format', 'webhook'
+          ],
+          { err: 'message' }
+        );
+        const json = JSON.parse(result);
+        if (json.status === 'ok' || json.status === 'skipped') {
+          setStatus('Connection test passed');
+        } else {
+          setError(json.message || 'Test failed');
+        }
+      } else {
+        setStatus('Test skipped (not in Cockpit environment)');
+      }
+    } catch (e) {
+      setError('Test failed: ' + (e.message || String(e)));
+    } finally {
+      setTesting(false);
+    }
+  }
+
+  const integrationTypes = [
+    { value: 'none', label: 'None' },
+    { value: 'oracle_cloud', label: 'Oracle Financials Cloud' },
+    { value: 'workday', label: 'Workday' },
+    { value: 'banner', label: 'Banner' },
+    { value: 'kuali', label: 'Kuali' },
+    { value: 'generic_webhook', label: 'Generic Webhook' }
+  ];
+
+  return React.createElement(
+    'div',
+    null,
+    React.createElement('h2', null, 'Financial Integration'),
+    React.createElement(
+      'p',
+      { style: { color: '#6b7280', fontSize: '0.9em' } },
+      'Connect SlurmLedger to your institution\'s financial system to export Journal Entries and trigger invoice event webhooks.'
+    ),
+    // Enable toggle
+    React.createElement(
+      'div',
+      { style: { marginBottom: '1em' } },
+      React.createElement('label', null,
+        React.createElement('input', {
+          type: 'checkbox',
+          checked: fi.enabled,
+          onChange: e => setFi(prev => ({ ...prev, enabled: e.target.checked })),
+          style: { marginRight: '6px' }
+        }),
+        React.createElement('strong', null, 'Enable Financial Integration')
+      )
+    ),
+    // Integration type
+    React.createElement(
+      'div',
+      { style: { marginBottom: '1em' } },
+      React.createElement('label', null, 'Integration Type: '),
+      React.createElement(
+        'select',
+        { value: fi.type, onChange: e => setFi(prev => ({ ...prev, type: e.target.value })) },
+        integrationTypes.map(t => React.createElement('option', { key: t.value, value: t.value }, t.label))
+      )
+    ),
+    fi.enabled && React.createElement(
+      'div',
+      null,
+      // Webhook URL
+      React.createElement(
+        'div',
+        { style: { marginBottom: '1em' } },
+        React.createElement('label', null, 'Webhook URL: '),
+        React.createElement('input', {
+          type: 'url',
+          value: fi.webhookUrl,
+          onChange: e => setFi(prev => ({ ...prev, webhookUrl: e.target.value })),
+          placeholder: 'https://erp.example.edu/api/hpc-invoices',
+          style: { width: '400px', maxWidth: '100%' }
+        })
+      ),
+      // API key
+      React.createElement(
+        'div',
+        { style: { marginBottom: '1em' } },
+        React.createElement('label', null, 'API Key: '),
+        React.createElement('input', {
+          type: 'password',
+          value: fi.apiKey,
+          onChange: e => setFi(prev => ({ ...prev, apiKey: e.target.value })),
+          placeholder: 'Bearer token or API key',
+          style: { width: '300px', maxWidth: '100%' }
+        })
+      ),
+      React.createElement(
+        'button',
+        { onClick: testConnection, disabled: testing, style: { marginBottom: '1.5em' } },
+        testing ? 'Testing...' : 'Test Connection'
+      )
+    ),
+    // Chart of Accounts mapping
+    React.createElement('h3', null, 'Chart of Accounts Mapping'),
+    React.createElement(
+      'p',
+      { style: { color: '#6b7280', fontSize: '0.9em' } },
+      'Map SLURM account names to your institution\'s chart string. A "default" entry applies to all unmapped accounts.'
+    ),
+    React.createElement(
+      'div',
+      { className: 'table-container' },
+      React.createElement(
+        'table',
+        { className: 'rates-table' },
+        React.createElement(
+          'thead',
+          null,
+          React.createElement('tr', null,
+            React.createElement('th', null, 'SLURM Account'),
+            React.createElement('th', null, 'Fund'),
+            React.createElement('th', null, 'Org'),
+            React.createElement('th', null, 'Account Code'),
+            React.createElement('th', null, 'Program'),
+            React.createElement('th', null)
+          )
+        ),
+        React.createElement(
+          'tbody',
+          null,
+          coaRows.length === 0
+            ? React.createElement('tr', null,
+                React.createElement('td', { colSpan: 6, style: { textAlign: 'center', color: '#9ca3af', padding: '1em' } },
+                  'No mappings. Add a "default" row as a fallback.'
+                )
+              )
+            : coaRows.map((row, idx) =>
+                React.createElement('tr', { key: idx },
+                  React.createElement('td', null,
+                    React.createElement('input', {
+                      type: 'text',
+                      value: row.account,
+                      onChange: e => updateCoa(idx, 'account', e.target.value),
+                      placeholder: 'account-name or default'
+                    })
+                  ),
+                  React.createElement('td', null,
+                    React.createElement('input', {
+                      type: 'text',
+                      value: row.fund,
+                      onChange: e => updateCoa(idx, 'fund', e.target.value),
+                      placeholder: '12345'
+                    })
+                  ),
+                  React.createElement('td', null,
+                    React.createElement('input', {
+                      type: 'text',
+                      value: row.org,
+                      onChange: e => updateCoa(idx, 'org', e.target.value),
+                      placeholder: 'PHYS'
+                    })
+                  ),
+                  React.createElement('td', null,
+                    React.createElement('input', {
+                      type: 'text',
+                      value: row.account_code,
+                      onChange: e => updateCoa(idx, 'account_code', e.target.value),
+                      placeholder: '54321'
+                    })
+                  ),
+                  React.createElement('td', null,
+                    React.createElement('input', {
+                      type: 'text',
+                      value: row.program,
+                      onChange: e => updateCoa(idx, 'program', e.target.value),
+                      placeholder: 'HPC'
+                    })
+                  ),
+                  React.createElement('td', null,
+                    React.createElement('button', {
+                      className: 'link-btn',
+                      onClick: () => removeCoaRow(idx),
+                      style: { color: '#dc2626' }
+                    }, 'Remove')
+                  )
+                )
+              )
+        )
+      )
+    ),
+    React.createElement(
+      'button',
+      { onClick: addCoaRow, style: { marginTop: '0.75em' } },
+      'Add Row'
+    ),
+    React.createElement(
+      'div',
+      { style: { marginTop: '1.5em' } },
+      React.createElement('button', { onClick: save }, 'Save'),
+      status && React.createElement('span', { style: { marginLeft: '0.5em', color: '#16a34a' } }, status),
+      error && React.createElement('span', { className: 'error', style: { marginLeft: '0.5em' } }, error)
+    )
+  );
+}
+
 function Rates({ onRatesUpdated }) {
   const [config, setConfig] = useState(null);
   const [originalConfig, setOriginalConfig] = useState(null);
   const [overrides, setOverrides] = useState([]);
+  const [allocations, setAllocations] = useState({});
   const [accounts, setAccounts] = useState([]);
   const [error, setError] = useState(null);
   const [saving, setSaving] = useState(false);
   const [status, setStatus] = useState(null);
+  const [ratesTab, setRatesTab] = useState('rates'); // 'rates' | 'allocations'
   const baseDir = PLUGIN_BASE;
 
   useEffect(() => {
@@ -1865,6 +2555,7 @@ function Rates({ onRatesUpdated }) {
             }))
           : [];
         setOverrides(ovrs);
+        setAllocations(json.allocations || {});
       } catch (e) {
         console.error(e);
         if (!cancelled) setError('Failed to load rates');
@@ -1986,6 +2677,13 @@ function Rates({ onRatesUpdated }) {
         delete json.overrides;
       }
 
+      // Persist allocations from the UI state
+      if (Object.keys(allocations).length) {
+        json.allocations = allocations;
+      } else {
+        delete json.allocations;
+      }
+
       const text = JSON.stringify(json, null, 2);
       if (window.cockpit && window.cockpit.file) {
         await window.cockpit.file(`${baseDir}/rates.json`).replace(text);
@@ -2010,10 +2708,9 @@ function Rates({ onRatesUpdated }) {
   if (!config)
     return React.createElement('p', null, 'Loading rate configuration...');
 
-  return React.createElement(
+  const ratesContent = React.createElement(
     'div',
     null,
-    React.createElement(InstitutionProfile, null),
     React.createElement('h2', null, 'Rate Configuration'),
     React.createElement(
       'div',
@@ -2142,6 +2839,57 @@ function Rates({ onRatesUpdated }) {
       saving && React.createElement('span', null, ' Saving...'),
       status && React.createElement('span', { style: { marginLeft: '0.5em' } }, status)
     )
+  );
+
+  return React.createElement(
+    'div',
+    null,
+    React.createElement(InstitutionProfile, null),
+    // Tab bar for Rates / Allocations / Financial Integration
+    React.createElement(
+      'div',
+      { style: { borderBottom: '2px solid #e5e7eb', marginBottom: '1em', marginTop: '1.5em' } },
+      ['rates', 'allocations', 'financial'].map(tab => {
+        const labels = { rates: 'Rate Configuration', allocations: 'Allocations', financial: 'Financial Integration' };
+        return React.createElement(
+          'button',
+          {
+            key: tab,
+            onClick: () => setRatesTab(tab),
+            style: {
+              marginRight: '4px',
+              borderBottom: ratesTab === tab ? '2px solid #3b82f6' : '2px solid transparent',
+              borderLeft: 'none',
+              borderRight: 'none',
+              borderTop: 'none',
+              background: 'none',
+              fontWeight: ratesTab === tab ? 'bold' : 'normal',
+              color: ratesTab === tab ? '#3b82f6' : undefined,
+              paddingBottom: '6px',
+              cursor: 'pointer'
+            }
+          },
+          labels[tab]
+        );
+      })
+    ),
+    ratesTab === 'rates' && ratesContent,
+    ratesTab === 'allocations' && React.createElement(AllocationsTab, {
+      allocations,
+      onAllocationsChange: updated => {
+        setAllocations(updated);
+        setStatus(null);
+      },
+      accounts
+    }),
+    ratesTab === 'allocations' && React.createElement(
+      'div',
+      { style: { marginTop: '1em' } },
+      React.createElement('button', { onClick: save, disabled: saving }, 'Save'),
+      saving && React.createElement('span', null, ' Saving...'),
+      status && React.createElement('span', { style: { marginLeft: '0.5em' } }, status)
+    ),
+    ratesTab === 'financial' && React.createElement(FinancialIntegrationTab, null)
   );
 }
 
@@ -2327,6 +3075,7 @@ function Invoices({ currentUser }) {
   const [filterAccount, setFilterAccount] = useState('');
   const [filterPeriod, setFilterPeriod] = useState('');
   const [refundTarget, setRefundTarget] = useState(null);
+  const [exportError, setExportError] = useState(null);
 
   useEffect(() => {
     setLoading(true);
@@ -2361,6 +3110,7 @@ function Invoices({ currentUser }) {
       status: 'sent',
       sent: new Date().toISOString()
     });
+    triggerWebhook('invoice.sent', inv.id);
   }
 
   async function handleMarkPaid(inv) {
@@ -2368,11 +3118,61 @@ function Invoices({ currentUser }) {
       status: 'paid',
       paid: new Date().toISOString()
     });
+    triggerWebhook('invoice.paid', inv.id);
   }
 
   async function handleCancel(inv) {
     if (!window.confirm(`Cancel invoice ${inv.id}?`)) return;
     await updateInvoice(inv.id, { status: 'cancelled' });
+  }
+
+  function triggerWebhook(eventType, invoiceId) {
+    if (!HAS_COCKPIT) return;
+    window.cockpit.spawn(
+      [
+        'python3', `${PLUGIN_BASE}/financial_export.py`,
+        '--event', eventType,
+        '--invoice-id', invoiceId,
+        '--format', 'webhook'
+      ],
+      { err: 'message' }
+    ).catch(e => console.warn('Webhook trigger failed:', e));
+  }
+
+  async function exportInvoiceFormat(inv, format) {
+    setExportError(null);
+    if (!HAS_COCKPIT) {
+      setExportError('Export requires Cockpit environment');
+      return;
+    }
+    try {
+      const output = await window.cockpit.spawn(
+        [
+          'python3', `${PLUGIN_BASE}/financial_export.py`,
+          '--event', 'invoice.export',
+          '--invoice-id', inv.id,
+          '--format', format
+        ],
+        { err: 'message' }
+      );
+      const mimeTypes = {
+        journal_csv: 'text/csv',
+        oracle_xml: 'application/xml',
+        json: 'application/json'
+      };
+      const extensions = { journal_csv: 'csv', oracle_xml: 'xml', json: 'json' };
+      const blob = new Blob([output], { type: mimeTypes[format] || 'text/plain' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `${inv.id}.${extensions[format] || 'txt'}`;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+    } catch (e) {
+      setExportError('Export failed: ' + (e.message || String(e)));
+    }
   }
 
   async function handleIssueRefund(inv, { amount, reason, partial: isPartial }) {
@@ -2390,6 +3190,7 @@ function Invoices({ currentUser }) {
       refunds: [...existingRefunds, refund]
     });
     setRefundTarget(null);
+    triggerWebhook('invoice.refunded', inv.id);
     // Generate credit memo PDF
     await generateCreditMemo(inv, refund);
   }
@@ -2578,6 +3379,41 @@ function Invoices({ currentUser }) {
                       'span',
                       { style: { marginLeft: '6px', fontSize: '0.8em', color: '#ea580c' } },
                       `Refunded: $${inv.refunds.reduce((s, r) => s + (r.amount || 0), 0).toFixed(2)}`
+                    ),
+                    // Export buttons
+                    React.createElement(
+                      'span',
+                      { style: { marginLeft: '6px' } },
+                      React.createElement(
+                        'button',
+                        {
+                          className: 'link-btn',
+                          onClick: () => exportInvoiceFormat(inv, 'journal_csv'),
+                          style: { marginRight: '4px', fontSize: '0.8em' },
+                          title: 'Export Journal Entry CSV'
+                        },
+                        'JE-CSV'
+                      ),
+                      React.createElement(
+                        'button',
+                        {
+                          className: 'link-btn',
+                          onClick: () => exportInvoiceFormat(inv, 'oracle_xml'),
+                          style: { marginRight: '4px', fontSize: '0.8em' },
+                          title: 'Export Oracle GL XML'
+                        },
+                        'Oracle-XML'
+                      ),
+                      React.createElement(
+                        'button',
+                        {
+                          className: 'link-btn',
+                          onClick: () => exportInvoiceFormat(inv, 'json'),
+                          style: { fontSize: '0.8em' },
+                          title: 'Export JSON'
+                        },
+                        'JSON'
+                      )
                     )
                   )
                 )
@@ -2585,6 +3421,8 @@ function Invoices({ currentUser }) {
             )
           )
         ),
+
+    exportError && React.createElement('p', { className: 'error', style: { marginTop: '0.5em' } }, exportError),
 
     // Refund modal
     refundTarget && React.createElement(RefundModal, {
@@ -2730,6 +3568,67 @@ function getNavTabs(userRole) {
 }
 
 // ---------------------------------------------------------------------------
+// Budget Alerts Panel (Task A3)
+// ---------------------------------------------------------------------------
+
+function BudgetAlertsPanel({ details }) {
+  // Collect accounts with allocation info that have an active alert level
+  const alerts = (details || [])
+    .filter(d => d.allocation && d.allocation.alert_level)
+    .map(d => ({
+      account: d.account,
+      ...d.allocation
+    }));
+
+  if (alerts.length === 0) return null;
+
+  const iconFor = level => {
+    if (level === 'exceeded') return '\ud83d\udd34';
+    if (level === 'critical') return '\ud83d\udd34';
+    return '\u26a0\ufe0f';
+  };
+  const colorFor = level => {
+    if (level === 'exceeded') return '#7c2d12';
+    if (level === 'critical') return '#dc2626';
+    return '#d97706';
+  };
+
+  return React.createElement(
+    'div',
+    {
+      style: {
+        border: '1px solid #e5e7eb',
+        borderRadius: '6px',
+        padding: '1em',
+        marginBottom: '1.5em',
+        background: '#fffbeb'
+      }
+    },
+    React.createElement('h3', { style: { marginTop: 0 } }, 'Budget Alerts'),
+    alerts.map(a => React.createElement(
+      'div',
+      {
+        key: a.account,
+        style: {
+          padding: '0.4em 0',
+          color: colorFor(a.alert_level),
+          fontSize: '0.95em'
+        }
+      },
+      `${iconFor(a.alert_level)} ${a.account}: `,
+      React.createElement('strong', null, `${a.percent_used}%`),
+      ` of ${a.alloc_type === 'prepaid' ? (a.alloc_period || 'period') : 'budget'} allocation used`,
+      a.budget_su != null
+        ? ` (${Number(a.used_su).toLocaleString()} / ${Number(a.budget_su).toLocaleString()} SU)`
+        : '',
+      a.alert_level === 'exceeded'
+        ? React.createElement('strong', null, ' — EXCEEDED')
+        : null
+    ))
+  );
+}
+
+// ---------------------------------------------------------------------------
 // Role-specific dashboard variants (C3)
 // ---------------------------------------------------------------------------
 function AdminDashboard({ summary, details, daily, yearly, monthly, invoiceLedger = { invoices: [] } }) {
@@ -2744,13 +3643,13 @@ function AdminDashboard({ summary, details, daily, yearly, monthly, invoiceLedge
     if (inv.status in invCounts) invCounts[inv.status]++;
   });
 
-  // Budget alerts: accounts over 80% of allocation (placeholder — allocation data not in schema yet)
   const topAccounts = details.slice().sort((a, b) => (b.cost || 0) - (a.cost || 0)).slice(0, 5);
 
   return React.createElement(
     'div',
     null,
     React.createElement('h2', null, 'Admin Dashboard'),
+    React.createElement(BudgetAlertsPanel, { details }),
 
     // KPI row
     React.createElement(
@@ -2861,6 +3760,59 @@ function PiDashboard({ summary, details, daily, username }) {
         renderChart: () => React.createElement(KpiSparkline, { data: daily.map(d => d.core_hours) })
       })
     ),
+    // Per-account allocation status for PI
+    myAccounts.some(a => a.allocation && a.allocation.budget_su != null) &&
+      React.createElement(
+        'div',
+        { style: { marginBottom: '1.5em' } },
+        React.createElement('h3', null, 'Allocation Status'),
+        React.createElement(
+          'div',
+          { className: 'table-container' },
+          React.createElement(
+            'table',
+            { className: 'summary-table' },
+            React.createElement('thead', null,
+              React.createElement('tr', null,
+                React.createElement('th', null, 'Account'),
+                React.createElement('th', null, 'Used SU'),
+                React.createElement('th', null, 'Budget SU'),
+                React.createElement('th', null, 'Remaining'),
+                React.createElement('th', null, 'Usage'),
+                React.createElement('th', null, 'Status')
+              )
+            ),
+            React.createElement('tbody', null,
+              myAccounts
+                .filter(a => a.allocation && a.allocation.budget_su != null)
+                .map(a => {
+                  const alloc = a.allocation;
+                  return React.createElement('tr', { key: a.account },
+                    React.createElement('td', null, a.account),
+                    React.createElement('td', null, Number(alloc.used_su).toLocaleString()),
+                    React.createElement('td', null, Number(alloc.budget_su).toLocaleString()),
+                    React.createElement('td', null,
+                      alloc.remaining_su != null
+                        ? Number(alloc.remaining_su).toLocaleString()
+                        : '\u2014'
+                    ),
+                    React.createElement('td', null,
+                      alloc.percent_used != null
+                        ? React.createElement('span', null,
+                            React.createElement(AllocationProgressBar, { percent: alloc.percent_used }),
+                            React.createElement('span', { style: { marginLeft: '6px' } }, `${alloc.percent_used}%`)
+                          )
+                        : '\u2014'
+                    ),
+                    React.createElement('td', null,
+                      React.createElement(AllocationBadge, { alertLevel: alloc.alert_level })
+                    )
+                  );
+                })
+            )
+          )
+        )
+      ),
     React.createElement('h3', null, 'User Breakdown'),
     React.createElement(
       'div',

@@ -24,6 +24,13 @@
   "departmentName": "",
   "costCenter": "",
   "notes": "",
-  "logo": ""
+  "logo": "",
+  "financialIntegration": {
+    "enabled": false,
+    "type": "none",
+    "webhookUrl": "",
+    "apiKey": "",
+    "chartOfAccounts": {}
+  }
 }
 

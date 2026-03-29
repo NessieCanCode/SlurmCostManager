@@ -20,5 +20,26 @@
       "gpuRate": 0.25,
       "discount": 0.1
     }
+  },
+  "allocations": {
+    "physics-lab": {
+      "type": "prepaid",
+      "budget_su": 500000,
+      "period": "annual",
+      "start_date": "2026-01-01",
+      "end_date": "2026-12-31",
+      "carryover": false,
+      "alerts": [80, 90, 100]
+    },
+    "chem-dept": {
+      "type": "postpaid",
+      "billing_period": "monthly",
+      "budget_su": null
+    }
+  },
+  "billing_defaults": {
+    "type": "postpaid",
+    "billing_period": "monthly",
+    "payment_terms_days": 30
   }
 }
