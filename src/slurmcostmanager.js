@@ -1137,8 +1137,9 @@ function Details({
         setError('No usage data matches current filters');
         return;
       }
+      const PDF_STORE_DIR = '/etc/slurmledger/invoices';
       const output = await window.cockpit.spawn(
-        ['python3', `${PLUGIN_BASE}/invoice.py`],
+        ['python3', `${PLUGIN_BASE}/invoice.py`, '--output-dir', PDF_STORE_DIR],
         { input: JSON.stringify(invoiceData), err: 'out' }
       );
       const trimmed = output.trim();
@@ -1170,7 +1171,11 @@ function Details({
       document.body.removeChild(a);
       URL.revokeObjectURL(url);
       // Record the invoice in the ledger
-      await saveInvoiceToLedger({ ...invoiceData, account: filters.account || '' }, invoiceData.total_due);
+      const safeName = invoiceData.invoice_number.replace(/[^A-Za-z0-9_\-]/g, '_');
+      await saveInvoiceToLedger(
+        { ...invoiceData, account: filters.account || '', pdf_path: `/etc/slurmledger/invoices/${safeName}.pdf` },
+        invoiceData.total_due
+      );
       // Trigger financial integration webhook for invoice.created
       if (HAS_COCKPIT) {
         const webhookAt = new Date().toISOString();
@@ -3053,6 +3058,8 @@ function Rates({ onRatesUpdated, billingData }) {
   const [status, setStatus] = useState(null);
   const [ratesChangeLog, setRatesChangeLog] = useState([]);
   const [ratesTab, setRatesTab] = useState('rates'); // 'rates' | 'allocations' | 'billing-rules' | 'financial'
+  // historicalRates: array of { date: 'YYYY-MM', cpuRate: number, gpuRate: number }
+  const [historicalRates, setHistoricalRates] = useState([]);
   const baseDir = PLUGIN_BASE;
 
   useEffect(() => {
@@ -3075,6 +3082,18 @@ function Rates({ onRatesUpdated, billingData }) {
           defaultGpuRate: json.defaultGpuRate ?? ''
         });
         setRatesChangeLog(json.changeLog || []);
+
+        // Merge historicalRates + historicalGpuRates into a unified array
+        // keyed by YYYY-MM date string for display and editing.
+        const histCpu = json.historicalRates || {};
+        const histGpu = json.historicalGpuRates || {};
+        const allDates = Array.from(new Set([...Object.keys(histCpu), ...Object.keys(histGpu)])).sort().reverse();
+        setHistoricalRates(allDates.map(d => ({
+          date: d,
+          cpuRate: histCpu[d] != null ? histCpu[d] : '',
+          gpuRate: histGpu[d] != null ? histGpu[d] : ''
+        })));
+
         const ovrs = json.overrides
           ? Object.entries(json.overrides).map(([account, cfg]) => ({
               account,
@@ -3246,6 +3265,26 @@ function Rates({ onRatesUpdated, billingData }) {
       const updatedLog = [...ratesChangeLog, changeEntry].slice(-50);
       json.changeLog = updatedLog;
       setRatesChangeLog(updatedLog);
+
+      // Persist historical rates back into the two separate maps
+      if (historicalRates.length) {
+        const histCpuOut = {};
+        const histGpuOut = {};
+        historicalRates.forEach(entry => {
+          if (!entry.date) return;
+          const cpuVal = parseFloat(entry.cpuRate);
+          const gpuVal = parseFloat(entry.gpuRate);
+          if (Number.isFinite(cpuVal)) histCpuOut[entry.date] = cpuVal;
+          if (Number.isFinite(gpuVal)) histGpuOut[entry.date] = gpuVal;
+        });
+        if (Object.keys(histCpuOut).length) json.historicalRates = histCpuOut;
+        else delete json.historicalRates;
+        if (Object.keys(histGpuOut).length) json.historicalGpuRates = histGpuOut;
+        else delete json.historicalGpuRates;
+      } else {
+        delete json.historicalRates;
+        delete json.historicalGpuRates;
+      }
 
       const text = JSON.stringify(json, null, 2);
       if (window.cockpit && window.cockpit.file) {
@@ -3446,6 +3485,128 @@ function Rates({ onRatesUpdated, billingData }) {
             )
           )
         )
+      )
+    ),
+
+    // Historical Rates section
+    React.createElement(
+      'div',
+      { style: { marginTop: '2em' } },
+      React.createElement('h3', { style: { marginBottom: '0.5em' } }, 'Historical Rates'),
+      React.createElement(
+        'p',
+        { style: { fontSize: '0.85em', color: '#6b7280', marginBottom: '0.75em' } },
+        'Track rates that were effective in prior billing periods. These are stored in rates.json and used for accurate retroactive billing.'
+      ),
+      React.createElement(
+        'div',
+        {
+          style: {
+            border: '1px solid #e5e7eb',
+            borderRadius: '6px',
+            overflow: 'hidden'
+          }
+        },
+        React.createElement(
+          'table',
+          { className: 'details-table', style: { margin: 0 } },
+          React.createElement(
+            'thead',
+            null,
+            React.createElement(
+              'tr',
+              null,
+              React.createElement('th', null, 'Effective Date (YYYY-MM)'),
+              React.createElement('th', null, 'CPU Rate ($/core-hr)'),
+              React.createElement('th', null, 'GPU Rate ($/GPU-hr)'),
+              React.createElement('th', null)
+            )
+          ),
+          React.createElement(
+            'tbody',
+            null,
+            historicalRates.length === 0
+              ? React.createElement(
+                  'tr',
+                  null,
+                  React.createElement(
+                    'td',
+                    { colSpan: 4, style: { textAlign: 'center', color: '#9ca3af', padding: '1em' } },
+                    'No historical rate entries. Add one below.'
+                  )
+                )
+              : historicalRates.map((entry, idx) =>
+                  React.createElement(
+                    'tr',
+                    { key: idx },
+                    React.createElement(
+                      'td',
+                      null,
+                      React.createElement('input', {
+                        type: 'text',
+                        placeholder: 'YYYY-MM',
+                        value: entry.date,
+                        style: { width: '100px' },
+                        onChange: e => setHistoricalRates(prev =>
+                          prev.map((r, i) => i === idx ? { ...r, date: e.target.value } : r)
+                        )
+                      })
+                    ),
+                    React.createElement(
+                      'td',
+                      null,
+                      React.createElement('input', {
+                        type: 'number',
+                        step: '0.001',
+                        value: entry.cpuRate,
+                        onChange: e => setHistoricalRates(prev =>
+                          prev.map((r, i) => i === idx ? { ...r, cpuRate: e.target.value } : r)
+                        )
+                      })
+                    ),
+                    React.createElement(
+                      'td',
+                      null,
+                      React.createElement('input', {
+                        type: 'number',
+                        step: '0.001',
+                        value: entry.gpuRate,
+                        onChange: e => setHistoricalRates(prev =>
+                          prev.map((r, i) => i === idx ? { ...r, gpuRate: e.target.value } : r)
+                        )
+                      })
+                    ),
+                    React.createElement(
+                      'td',
+                      null,
+                      React.createElement(
+                        'button',
+                        {
+                          className: 'link-btn',
+                          onClick: () => setHistoricalRates(prev => prev.filter((_, i) => i !== idx))
+                        },
+                        'Remove'
+                      )
+                    )
+                  )
+                )
+          )
+        )
+      ),
+      React.createElement(
+        'button',
+        {
+          onClick: () => setHistoricalRates(prev => [{ date: '', cpuRate: '', gpuRate: '' }, ...prev]),
+          style: { marginTop: '0.5em' }
+        },
+        'Add Entry'
+      ),
+      React.createElement(
+        'div',
+        { style: { marginTop: '0.75em' } },
+        React.createElement('button', { onClick: save, disabled: saving }, 'Save Historical Rates'),
+        saving && React.createElement('span', null, ' Saving...'),
+        status && React.createElement('span', { style: { marginLeft: '0.5em' } }, status)
       )
     )
   );
@@ -4450,7 +4611,8 @@ async function saveInvoiceToLedger(invoiceData, amount) {
       institution: invoiceData.institution || {},
       logo: invoiceData.logo || '',
       bank_info: invoiceData.bank_info || [],
-      refunds: []
+      refunds: [],
+      pdf_path: invoiceData.pdf_path || null
     };
     if (HAS_COCKPIT) {
       await window.cockpit.spawn(
@@ -4560,12 +4722,178 @@ function useCurrentUser() {
 }
 
 // Role-gated nav tabs definition
+// ---------------------------------------------------------------------------
+// Audit Log Viewer — aggregates audit_log entries across all invoices
+// ---------------------------------------------------------------------------
+function AuditLogViewer({ invoiceLedger }) {
+  const [filterStart, setFilterStart] = useState('');
+  const [filterEnd, setFilterEnd] = useState('');
+  const [filterAction, setFilterAction] = useState('');
+  const [sortAsc, setSortAsc] = useState(false);
+
+  // Flatten audit_log entries from all invoices
+  const allEntries = useMemo(() => {
+    const invoices = (invoiceLedger && invoiceLedger.invoices) || [];
+    const rows = [];
+    invoices.forEach(inv => {
+      (inv.audit_log || []).forEach(entry => {
+        rows.push({
+          timestamp: entry.at || '',
+          invoice_number: inv.id || '',
+          action: entry.action || '',
+          details: [
+            entry.from && entry.to ? `${entry.from} \u2192 ${entry.to}` : null,
+            entry.amount != null ? `Amount: $${Number(entry.amount).toFixed(2)}` : null,
+          ].filter(Boolean).join('; ') || '',
+          user: entry.by || 'unknown'
+        });
+      });
+    });
+    return rows;
+  }, [invoiceLedger]);
+
+  // Collect distinct action types for the filter dropdown
+  const actionTypes = useMemo(() => {
+    const set = new Set(allEntries.map(e => e.action).filter(Boolean));
+    return Array.from(set).sort();
+  }, [allEntries]);
+
+  const filtered = useMemo(() => {
+    let rows = allEntries;
+    if (filterStart) {
+      rows = rows.filter(r => r.timestamp >= filterStart);
+    }
+    if (filterEnd) {
+      // Include the full end day by appending T23:59:59
+      rows = rows.filter(r => r.timestamp <= filterEnd + 'T23:59:59');
+    }
+    if (filterAction) {
+      rows = rows.filter(r => r.action === filterAction);
+    }
+    rows = rows.slice().sort((a, b) => {
+      const cmp = a.timestamp < b.timestamp ? -1 : a.timestamp > b.timestamp ? 1 : 0;
+      return sortAsc ? cmp : -cmp;
+    });
+    return rows;
+  }, [allEntries, filterStart, filterEnd, filterAction, sortAsc]);
+
+  return React.createElement(
+    'div',
+    null,
+    React.createElement('h2', null, 'Audit Log'),
+    React.createElement(
+      'div',
+      { style: { display: 'flex', gap: '1em', flexWrap: 'wrap', marginBottom: '1em', alignItems: 'flex-end' } },
+      React.createElement(
+        'label',
+        { style: { fontSize: '0.9em' } },
+        'From: ',
+        React.createElement('input', {
+          type: 'date',
+          value: filterStart,
+          onChange: e => setFilterStart(e.target.value),
+          style: { marginLeft: '0.25em' }
+        })
+      ),
+      React.createElement(
+        'label',
+        { style: { fontSize: '0.9em' } },
+        'To: ',
+        React.createElement('input', {
+          type: 'date',
+          value: filterEnd,
+          onChange: e => setFilterEnd(e.target.value),
+          style: { marginLeft: '0.25em' }
+        })
+      ),
+      React.createElement(
+        'label',
+        { style: { fontSize: '0.9em' } },
+        'Action: ',
+        React.createElement(
+          'select',
+          {
+            value: filterAction,
+            onChange: e => setFilterAction(e.target.value),
+            style: { marginLeft: '0.25em' }
+          },
+          React.createElement('option', { value: '' }, 'All'),
+          actionTypes.map(a => React.createElement('option', { key: a, value: a }, a))
+        )
+      ),
+      React.createElement(
+        'button',
+        {
+          onClick: () => { setFilterStart(''); setFilterEnd(''); setFilterAction(''); },
+          style: { fontSize: '0.85em' }
+        },
+        'Clear Filters'
+      )
+    ),
+    filtered.length === 0
+      ? React.createElement('p', { style: { color: '#6b7280' } }, 'No audit entries match the current filters.')
+      : React.createElement(
+          'div',
+          { className: 'table-container' },
+          React.createElement(
+            'table',
+            { className: 'details-table' },
+            React.createElement(
+              'thead',
+              null,
+              React.createElement(
+                'tr',
+                null,
+                React.createElement(
+                  'th',
+                  {
+                    style: { cursor: 'pointer', userSelect: 'none' },
+                    onClick: () => setSortAsc(v => !v),
+                    title: 'Click to toggle sort direction'
+                  },
+                  `Timestamp ${sortAsc ? '\u25b2' : '\u25bc'}`
+                ),
+                React.createElement('th', null, 'Invoice #'),
+                React.createElement('th', null, 'Action'),
+                React.createElement('th', null, 'Details'),
+                React.createElement('th', null, 'User')
+              )
+            ),
+            React.createElement(
+              'tbody',
+              null,
+              filtered.map((row, i) =>
+                React.createElement(
+                  'tr',
+                  { key: i },
+                  React.createElement(
+                    'td',
+                    { style: { whiteSpace: 'nowrap', fontSize: '0.85em' } },
+                    row.timestamp ? new Date(row.timestamp).toLocaleString() : ''
+                  ),
+                  React.createElement('td', { style: { fontSize: '0.85em' } }, row.invoice_number),
+                  React.createElement(
+                    'td',
+                    { style: { fontSize: '0.85em', fontWeight: 'bold' } },
+                    row.action
+                  ),
+                  React.createElement('td', { style: { fontSize: '0.85em' } }, row.details),
+                  React.createElement('td', { style: { fontSize: '0.85em' } }, row.user)
+                )
+              )
+            )
+          )
+        )
+  );
+}
+
 function getNavTabs(userRole) {
   const tabs = [
     { id: 'year', label: 'Fiscal Year Overview', roles: ['admin', 'pi', 'member', 'finance'] },
     { id: 'summary', label: 'Monthly Summary Reports', roles: ['admin', 'pi', 'member', 'finance'] },
     { id: 'details', label: 'Detailed Transactions', roles: ['admin', 'pi', 'member', 'finance'] },
     { id: 'invoices', label: 'Invoices', roles: ['admin', 'pi', 'finance'] },
+    { id: 'audit', label: 'Audit Log', roles: ['admin', 'finance'] },
     { id: 'settings', label: 'Administration', roles: ['admin'] }
   ];
   return tabs.filter(t => t.roles.includes(userRole));
@@ -4635,7 +4963,33 @@ function BudgetAlertsPanel({ details }) {
 // ---------------------------------------------------------------------------
 // Role-specific dashboard variants (C3)
 // ---------------------------------------------------------------------------
-function AdminDashboard({ summary, details, daily, yearly, monthly, invoiceLedger = { invoices: [] } }) {
+// Helper: format a period-over-period delta as a coloured badge string.
+// For cost: red = increase (bad), green = decrease (good).
+// For utilization (core/gpu hours): green = increase (good), red = decrease (bad).
+function _deltaBadge(current, previous, invertColour = false) {
+  if (previous == null || previous === 0 || current == null) return null;
+  const pct = ((current - previous) / Math.abs(previous)) * 100;
+  const sign = pct >= 0 ? '+' : '';
+  const label = `${sign}${pct.toFixed(1)}% vs last period`;
+  // invertColour=true means "increase is good" (utilization); false means "increase is bad" (cost)
+  const color = invertColour
+    ? (pct >= 0 ? '#16a34a' : '#dc2626')
+    : (pct >= 0 ? '#dc2626' : '#16a34a');
+  return React.createElement(
+    'span',
+    {
+      style: {
+        fontSize: '0.75em',
+        color,
+        display: 'block',
+        marginTop: '2px'
+      }
+    },
+    label
+  );
+}
+
+function AdminDashboard({ summary, details, daily, yearly, monthly, invoiceLedger = { invoices: [] }, prevSummary }) {
   const historical = yearly.length ? yearly : monthly;
   const historicalLabel = yearly.length
     ? 'Historical CPU/GPU-hrs (yearly)'
@@ -4649,6 +5003,13 @@ function AdminDashboard({ summary, details, daily, yearly, monthly, invoiceLedge
 
   const topAccounts = details.slice().sort((a, b) => (b.cost || 0) - (a.cost || 0)).slice(0, 5);
 
+  const totalCost = summary ? Number(summary.total) : 0;
+  const prevTotalCost = prevSummary ? Number(prevSummary.total) : null;
+  const totalCoreHours = summary ? Number(summary.core_hours) : 0;
+  const prevCoreHours = prevSummary ? Number(prevSummary.core_hours) : null;
+  const totalGpuHours = summary ? Number(summary.gpu_hours || 0) : 0;
+  const prevGpuHours = prevSummary ? Number(prevSummary.gpu_hours || 0) : null;
+
   return React.createElement(
     'div',
     null,
@@ -4661,7 +5022,12 @@ function AdminDashboard({ summary, details, daily, yearly, monthly, invoiceLedge
       { className: 'kpi-grid' },
       React.createElement(KpiTile, {
         label: 'Total Cluster Cost This Period',
-        value: `$${summary ? summary.total : 0}`
+        value: React.createElement(
+          'span',
+          null,
+          `$${totalCost}`,
+          _deltaBadge(totalCost, prevTotalCost, false)
+        )
       }),
       React.createElement(KpiTile, {
         label: 'Invoices: Draft / Sent / Paid',
@@ -4669,8 +5035,23 @@ function AdminDashboard({ summary, details, daily, yearly, monthly, invoiceLedge
       }),
       React.createElement(KpiTile, {
         label: 'Total CPU-hours',
-        value: summary ? summary.core_hours : 0,
+        value: React.createElement(
+          'span',
+          null,
+          totalCoreHours,
+          _deltaBadge(totalCoreHours, prevCoreHours, true)
+        ),
         renderChart: () => React.createElement(KpiSparkline, { data: daily.map(d => d.core_hours) })
+      }),
+      totalGpuHours > 0 && React.createElement(KpiTile, {
+        label: 'Total GPU-hours',
+        value: React.createElement(
+          'span',
+          null,
+          totalGpuHours,
+          _deltaBadge(totalGpuHours, prevGpuHours, true)
+        ),
+        renderChart: () => React.createElement(KpiSparkline, { data: daily.map(d => d.gpu_hours || 0) })
       })
     ),
 
@@ -4885,7 +5266,7 @@ function MemberDashboard({ summary, details, daily, username }) {
   );
 }
 
-function RoleAwareSummary({ summary, details, daily, yearly, monthly, userRole, username, invoiceLedger }) {
+function RoleAwareSummary({ summary, details, daily, yearly, monthly, userRole, username, invoiceLedger, prevSummary }) {
   if (!summary) {
     return React.createElement(
       'div',
@@ -4897,13 +5278,241 @@ function RoleAwareSummary({ summary, details, daily, yearly, monthly, userRole, 
 
   if (userRole === 'admin' || userRole === 'finance') {
     return React.createElement(AdminDashboard, {
-      summary, details, daily, yearly: yearly || [], monthly: monthly || [], invoiceLedger
+      summary, details, daily, yearly: yearly || [], monthly: monthly || [], invoiceLedger, prevSummary
     });
   }
   if (userRole === 'pi') {
     return React.createElement(PiDashboard, { summary, details, daily, username });
   }
   return React.createElement(MemberDashboard, { summary, details, daily, username });
+}
+
+// ---------------------------------------------------------------------------
+// First-run Setup Wizard
+// ---------------------------------------------------------------------------
+function SetupWizard({ onComplete }) {
+  const [step, setStep] = useState(1); // 1, 2, 3
+  const [dbStatus, setDbStatus] = useState(null); // null | 'testing' | 'ok' | 'error'
+  const [dbError, setDbError] = useState(null);
+  const baseDir = PLUGIN_BASE;
+
+  async function markSetupComplete() {
+    try {
+      let existing = {};
+      try {
+        let text;
+        if (window.cockpit && window.cockpit.file) {
+          text = await window.cockpit.file(`${baseDir}/institution.json`).read();
+        } else {
+          const resp = await fetch('institution.json');
+          if (resp.ok) text = await resp.text();
+        }
+        if (text) existing = JSON.parse(text);
+      } catch (_) { /* use empty object */ }
+      const updated = JSON.stringify({ ...existing, setupComplete: true }, null, 2);
+      if (window.cockpit && window.cockpit.file) {
+        await window.cockpit.file(`${baseDir}/institution.json`).replace(updated);
+      } else {
+        await fetch('institution.json', {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: updated
+        });
+      }
+    } catch (e) {
+      console.warn('Could not mark setup complete:', e);
+    }
+    if (onComplete) onComplete();
+  }
+
+  async function testDbConnection() {
+    setDbStatus('testing');
+    setDbError(null);
+    try {
+      if (HAS_COCKPIT) {
+        const today = new Date();
+        const start = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-01`;
+        const end = today.toISOString().slice(0, 10);
+        await window.cockpit.spawn(
+          ['python3', `${baseDir}/slurmdb.py`, '--start', start, '--end', end, '--output', '-'],
+          { err: 'message' }
+        );
+        setDbStatus('ok');
+      } else {
+        // No Cockpit — skip the live test
+        setDbStatus('ok');
+      }
+    } catch (e) {
+      setDbStatus('error');
+      setDbError(e.message || String(e));
+    }
+  }
+
+  const stepTitles = [
+    '1. Configure Institution',
+    '2. Set Billing Rates',
+    '3. Test Database Connection'
+  ];
+
+  const progressBar = React.createElement(
+    'div',
+    { style: { display: 'flex', gap: '0.5em', marginBottom: '1.5em' } },
+    stepTitles.map((title, i) => {
+      const num = i + 1;
+      const isActive = step === num;
+      const isDone = step > num;
+      return React.createElement(
+        'div',
+        {
+          key: num,
+          style: {
+            flex: 1,
+            padding: '0.5em 0.75em',
+            borderRadius: '6px',
+            fontSize: '0.85em',
+            background: isDone ? '#d1fae5' : isActive ? '#eff6ff' : '#f3f4f6',
+            border: isActive ? '2px solid #3b82f6' : '2px solid transparent',
+            color: isDone ? '#065f46' : isActive ? '#1d4ed8' : '#6b7280',
+            fontWeight: isActive ? 'bold' : 'normal'
+          }
+        },
+        isDone ? '\u2713 ' + title : title
+      );
+    })
+  );
+
+  return React.createElement(
+    'div',
+    {
+      style: {
+        maxWidth: '700px',
+        margin: '2em auto',
+        padding: '2em',
+        border: '1px solid #e5e7eb',
+        borderRadius: '8px',
+        background: '#fff'
+      }
+    },
+    React.createElement(
+      'div',
+      { style: { marginBottom: '1.5em' } },
+      React.createElement('h2', { style: { margin: 0 } }, 'Welcome to SlurmLedger'),
+      React.createElement(
+        'p',
+        { style: { color: '#6b7280', marginTop: '0.5em' } },
+        'Complete these steps to get started with billing configuration.'
+      )
+    ),
+    progressBar,
+
+    // Step 1: Institution Profile
+    step === 1 && React.createElement(
+      'div',
+      null,
+      React.createElement(InstitutionProfile, null),
+      React.createElement(
+        'div',
+        { style: { marginTop: '1.5em', display: 'flex', justifyContent: 'flex-end' } },
+        React.createElement(
+          'button',
+          { onClick: () => setStep(2) },
+          'Next: Set Billing Rates \u2192'
+        )
+      )
+    ),
+
+    // Step 2: Rate Configuration (embedded Rates tab, rates sub-tab only)
+    step === 2 && React.createElement(
+      'div',
+      null,
+      React.createElement(Rates, { onRatesUpdated: () => {} }),
+      React.createElement(
+        'div',
+        { style: { marginTop: '1.5em', display: 'flex', justifyContent: 'space-between' } },
+        React.createElement('button', { onClick: () => setStep(1) }, '\u2190 Back'),
+        React.createElement(
+          'button',
+          { onClick: () => { setStep(3); testDbConnection(); } },
+          'Next: Test Connection \u2192'
+        )
+      )
+    ),
+
+    // Step 3: Database connection test
+    step === 3 && React.createElement(
+      'div',
+      null,
+      React.createElement('h3', null, 'Test Database Connection'),
+      React.createElement(
+        'p',
+        { style: { color: '#6b7280' } },
+        'SlurmLedger will attempt to load billing data for the current month to verify connectivity to the Slurm accounting database.'
+      ),
+      dbStatus === null && React.createElement('p', { style: { color: '#6b7280' } }, 'Preparing connection test...'),
+      dbStatus === 'testing' && React.createElement('p', { style: { color: '#3b82f6' } }, 'Testing connection...'),
+      dbStatus === 'ok' && React.createElement(
+        'div',
+        {
+          style: {
+            background: '#d1fae5',
+            border: '1px solid #6ee7b7',
+            borderRadius: '6px',
+            padding: '1em',
+            marginBottom: '1em'
+          }
+        },
+        React.createElement(
+          'strong',
+          { style: { color: '#065f46' } },
+          '\u2713 Connection successful'
+        ),
+        React.createElement('p', { style: { margin: '0.5em 0 0', color: '#065f46' } },
+          'Billing data loaded successfully. You\'re ready to start billing.')
+      ),
+      dbStatus === 'error' && React.createElement(
+        'div',
+        {
+          style: {
+            background: '#fee2e2',
+            border: '1px solid #fca5a5',
+            borderRadius: '6px',
+            padding: '1em',
+            marginBottom: '1em'
+          }
+        },
+        React.createElement('strong', { style: { color: '#991b1b' } }, 'Connection failed'),
+        React.createElement('p', { style: { margin: '0.5em 0 0', color: '#7f1d1d', fontFamily: 'monospace', fontSize: '0.85em' } },
+          dbError),
+        React.createElement(
+          'p',
+          { style: { margin: '0.5em 0 0', color: '#991b1b', fontSize: '0.9em' } },
+          'Check that the Slurm accounting database is running and accessible, then try again. You can still continue setup and fix this later.'
+        )
+      ),
+      React.createElement(
+        'div',
+        { style: { display: 'flex', justifyContent: 'space-between', marginTop: '1em' } },
+        React.createElement('button', { onClick: () => setStep(2) }, '\u2190 Back'),
+        React.createElement(
+          'div',
+          { style: { display: 'flex', gap: '0.5em' } },
+          dbStatus === 'error' && React.createElement(
+            'button',
+            { onClick: testDbConnection },
+            'Retry'
+          ),
+          React.createElement(
+            'button',
+            {
+              onClick: markSetupComplete,
+              style: { background: '#3b82f6', color: '#fff', border: 'none', borderRadius: '4px', padding: '0.5em 1.25em', cursor: 'pointer', fontWeight: 'bold' }
+            },
+            dbStatus === 'ok' ? 'Finish Setup' : 'Continue Anyway'
+          )
+        )
+      )
+    )
+  );
 }
 
 function App() {
@@ -4921,6 +5530,20 @@ function App() {
   const institutionProfile = useInstitutionProfile();
   const { username, userRole, loading: roleLoading } = useCurrentUser();
   const [invoiceLedger, setInvoiceLedger] = useState({ invoices: [] });
+
+  // Compute the previous period (prior month or prior year) for comparison KPIs
+  const prevPeriod = useMemo(() => {
+    if (view === 'year') {
+      return getYearPeriod(currentYear - 1);
+    }
+    // month is 'YYYY-MM'; subtract one month
+    const [y, m] = month.split('-').map(Number);
+    const prevDate = new Date(Date.UTC(y, m - 2, 1)); // m-2 because months are 0-indexed
+    const py = prevDate.getUTCFullYear();
+    const pm = String(prevDate.getUTCMonth() + 1).padStart(2, '0');
+    return getBillingPeriod(`${py}-${pm}`);
+  }, [view, month, currentYear]);
+  const { data: prevData } = useBillingData(prevPeriod);
 
   // Load invoice ledger for admin dashboard summary
   useEffect(() => {
@@ -4962,6 +5585,8 @@ function App() {
   const allowedViews = navTabs.map(t => t.id);
   const activeView = allowedViews.includes(view) ? view : allowedViews[0];
 
+  const [setupDismissed, setSetupDismissed] = useState(false);
+
   // Show a loading spinner while role is being resolved to prevent admin UI
   // from flashing for non-admin users before the role check completes.
   if (roleLoading) {
@@ -4969,6 +5594,22 @@ function App() {
       'div',
       { className: 'app', style: { display: 'flex', alignItems: 'center', justifyContent: 'center', minHeight: '200px' } },
       React.createElement('p', { style: { color: '#4b5563' } }, 'Loading...')
+    );
+  }
+
+  // First-run setup wizard: show when institution name is blank and setup not yet completed.
+  // Only show to admin users — other roles see normal UI even on first run.
+  const needsSetup =
+    !setupDismissed &&
+    userRole === 'admin' &&
+    !institutionProfile.setupComplete &&
+    !institutionProfile.institutionName;
+
+  if (needsSetup) {
+    return React.createElement(
+      'div',
+      { className: 'app' },
+      React.createElement(SetupWizard, { onComplete: () => setSetupDismissed(true) })
     );
   }
 
@@ -5039,9 +5680,9 @@ function App() {
           )
         )
       ),
-    activeView !== 'settings' && activeView !== 'invoices' && loading &&
+    activeView !== 'settings' && activeView !== 'invoices' && activeView !== 'audit' && loading &&
       React.createElement('p', null, 'Loading...'),
-    activeView !== 'settings' && activeView !== 'invoices' &&
+    activeView !== 'settings' && activeView !== 'invoices' && activeView !== 'audit' &&
       error &&
       React.createElement(
         'div',
@@ -5075,7 +5716,8 @@ function App() {
         monthly: [],
         userRole,
         username,
-        invoiceLedger
+        invoiceLedger,
+        prevSummary: prevData ? prevData.summary : null
       }),
     data &&
       activeView === 'summary' &&
@@ -5087,7 +5729,8 @@ function App() {
         monthly: data.monthly || [],
         userRole,
         username,
-        invoiceLedger
+        invoiceLedger,
+        prevSummary: prevData ? prevData.summary : null
       }),
     data &&
       activeView === 'details' &&
@@ -5112,6 +5755,7 @@ function App() {
         institutionProfile
       }),
     activeView === 'invoices' && React.createElement(Invoices, { currentUser: username, billingData: data, institutionProfile }),
+    activeView === 'audit' && React.createElement(AuditLogViewer, { invoiceLedger }),
     activeView === 'settings' && React.createElement(Rates, { onRatesUpdated: reload, billingData: data })
   );
 }

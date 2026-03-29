@@ -952,6 +952,43 @@ class SlurmDB:
             except (ValueError, TypeError, AttributeError):
                 pass  # fall back to the passed-in used_su
 
+        # Carry-forward: if the allocation period has ended and carryover is
+        # enabled, the admin can set carryover_su in the allocation config to
+        # credit unused SUs from the prior period into the current budget.
+        # Automatic calculation requires historical data not always available,
+        # so the amount is set manually by the admin.
+        carryover_active = False
+        carryover_su = 0.0
+        carryover_note = None
+        if alloc.get("carryover"):
+            today = date.today()
+            if alloc_end_str:
+                try:
+                    alloc_end = _fromisoformat(alloc_end_str).date()
+                    if today > alloc_end:
+                        # Period has ended; apply any manually configured carryover
+                        configured_carryover = alloc.get("carryover_su")
+                        if configured_carryover is not None:
+                            carryover_su = float(configured_carryover)
+                            budget = budget + carryover_su
+                            carryover_active = True
+                            carryover_note = (
+                                f"Carry-forward of {carryover_su:,.0f} SU applied "
+                                f"from period ending {alloc_end_str}"
+                            )
+                except (ValueError, TypeError):
+                    pass
+            elif not alloc_end_str:
+                # No end date but carryover_su set: apply unconditionally
+                configured_carryover = alloc.get("carryover_su")
+                if configured_carryover is not None:
+                    carryover_su = float(configured_carryover)
+                    budget = budget + carryover_su
+                    carryover_active = True
+                    carryover_note = (
+                        f"Carry-forward of {carryover_su:,.0f} SU applied"
+                    )
+
         remaining = budget - used_su
         percent = round(used_su / budget * 100, 1) if budget > 0 else 0.0
         alert_thresholds = sorted(alloc.get("alerts", [80, 90, 100]))
@@ -966,7 +1003,7 @@ class SlurmDB:
                     alert_level = "warning"
                 break
 
-        return {
+        result = {
             "budget_su": budget,
             "used_su": round(used_su, 2),
             "remaining_su": round(remaining, 2),
@@ -978,6 +1015,10 @@ class SlurmDB:
             "end_date": alloc_end_str,
             "carryover": alloc.get("carryover"),
         }
+        if carryover_active:
+            result["carryover_su"] = round(carryover_su, 2)
+            result["carryover_note"] = carryover_note
+        return result
 
     def _load_rates(self, rates_file: Optional[str]) -> Dict[str, Any]:
         path = rates_file or os.path.join(os.path.dirname(__file__), 'rates.json')

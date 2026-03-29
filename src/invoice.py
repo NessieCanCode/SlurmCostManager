@@ -543,6 +543,17 @@ def generate_invoice(buffer, invoice_data):
 
 
 def main():
+    import argparse
+    parser = argparse.ArgumentParser(description="Generate a PDF invoice")
+    parser.add_argument(
+        "--output-dir",
+        metavar="DIR",
+        default=None,
+        help="If set, save a copy of the generated PDF to this directory "
+             "in addition to writing base64-encoded output to stdout.",
+    )
+    args, _ = parser.parse_known_args()
+
     invoice_data = json.load(sys.stdin)
 
     # Legacy fallback: if institution block is missing, try to load from disk
@@ -579,6 +590,24 @@ def main():
     generate_invoice(buffer, invoice_data)
     buffer.seek(0)
     pdf_bytes = buffer.read()
+
+    # Optionally persist the PDF to a server-side directory so it can be
+    # retrieved later without re-generation.  The invoice_number is used as
+    # the filename so callers can correlate ledger entries with stored files.
+    if args.output_dir:
+        try:
+            os.makedirs(args.output_dir, exist_ok=True)
+            invoice_number = invoice_data.get("invoice_number", "unknown")
+            # Sanitize invoice_number to avoid path traversal
+            safe_name = re.sub(r'[^A-Za-z0-9_\-]', '_', str(invoice_number))
+            pdf_path = os.path.join(args.output_dir, f"{safe_name}.pdf")
+            with open(pdf_path, "wb") as fh:
+                fh.write(pdf_bytes)
+            logging.info("Saved invoice PDF to %s", pdf_path)
+        except OSError as exc:
+            # Non-fatal: log the error but still return the PDF to the caller
+            logging.warning("Could not save PDF to %s: %s", args.output_dir, exc)
+
     sys.stdout.write(base64.b64encode(pdf_bytes).decode("ascii"))
     sys.stdout.flush()
 
