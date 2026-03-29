@@ -41,5 +41,69 @@
     "type": "postpaid",
     "billing_period": "monthly",
     "payment_terms_days": 30
-  }
+  },
+  "billing_rules": [
+    {
+      "id": "no-charge-failed",
+      "name": "Don't charge failed jobs (except OOM and timeout)",
+      "enabled": true,
+      "condition": {
+        "field": "state",
+        "operator": "in",
+        "values": ["FAILED", "CANCELLED", "NODE_FAIL"]
+      },
+      "exclude_states": ["OUT_OF_MEMORY", "TIMEOUT"],
+      "action": "no_charge",
+      "description": "Failed jobs are not billed unless they failed due to OOM or timeout (user's fault)"
+    },
+    {
+      "id": "no-charge-short",
+      "name": "Don't charge jobs under 1 minute",
+      "enabled": true,
+      "condition": {
+        "field": "elapsed_seconds",
+        "operator": "less_than",
+        "value": 60
+      },
+      "action": "no_charge",
+      "description": "Very short jobs are likely setup failures and not charged"
+    },
+    {
+      "id": "discount-debug",
+      "name": "50% discount for debug partition",
+      "enabled": false,
+      "condition": {
+        "field": "partition",
+        "operator": "equals",
+        "value": "debug"
+      },
+      "action": "discount",
+      "discount_percent": 50,
+      "description": "Debug partition runs at half rate"
+    },
+    {
+      "id": "free-viz",
+      "name": "Visualization partition is free",
+      "enabled": false,
+      "condition": {
+        "field": "partition",
+        "operator": "equals",
+        "value": "viz"
+      },
+      "action": "no_charge",
+      "description": "Visualization partition is not billed"
+    },
+    {
+      "id": "cap-oom",
+      "name": "Cap OOM jobs at requested time",
+      "enabled": false,
+      "condition": {
+        "field": "state",
+        "operator": "equals",
+        "value": "OUT_OF_MEMORY"
+      },
+      "action": "charge_requested_time",
+      "description": "OOM jobs are charged for the time requested, not wall time"
+    }
+  ]
 }

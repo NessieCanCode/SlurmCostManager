@@ -1,160 +1,208 @@
 # SlurmLedger
 
-**SlurmLedger** is a Cockpit plugin that integrates seamlessly into the Cockpit UI on Linux servers. It provides interactive billing analytics and invoice management for HPC environments using **Slurm** and SlurmDBD.
+Full-featured HPC billing and allocation management for SLURM clusters. A Cockpit plugin that provides real-time cost tracking, SU bank management, professional invoicing, and financial system integration.
 
-This repository includes a responsive Cockpit UI built with React. The interface pulls live billing data from SlurmDBD using a bundled Python helper and offers summary, detail and invoice views with a built‑in PDF viewer.
+## Features
 
-## ✅ Features
+### Billing & Cost Tracking
+- Real-time cost calculation from SlurmDB
+- Per-account, per-user, per-job cost breakdown
+- CPU and GPU hour tracking with separate rates
+- Historical rate support for accurate retroactive billing
+- Configurable billing rules (exclude failed jobs, partition discounts, etc.)
 
-- **Monthly billing summaries** displayed right in Cockpit’s navigation menu.
-- **Selectable historical months** lets you view past billing periods for the current year while defaulting to the current month.
-- **Invoice dashboards** to view, download, and archive invoice PDFs.
-- **Detailed cost drill-downs** (core‑hours, GPU-hours) for per‑account transparency.
-- **Historical billing data** accessible from account inception for auditing and trend analysis.
-- **Organization-wide views** consolidating charges across all member Slurm accounts; cluster capacity is detected automatically from `slurm.conf`.
-- **Configurable rate table** with per-account overrides.
+### SU Bank / Allocation Management
+- Pre-paid and post-paid billing models
+- Annual, quarterly, monthly, or custom allocation periods
+- Budget tracking with configurable alert thresholds (80%/90%/100%)
+- Carryover rules for unused allocations
+- Real-time remaining balance display
 
+### Professional Invoicing
+- PDF invoice generation with institutional branding
+- Invoice lifecycle management (Draft → Sent → Viewed → Paid)
+- Refund support with credit memo generation
+- Configurable payment terms and bank details
+- Bulk invoice generation by account
 
+### Configurable Billing Rules
+- Rule-based charge/no-charge decisions
+- Failed jobs (except OOM/timeout) excluded by default
+- Partition-level discounts (e.g., debug queue at 50%)
+- Short job exclusion (under 1 minute)
+- Custom rules with flexible condition operators
+- Admin-configurable via UI — no code changes needed
 
-## 📁 Project Structure
+### Financial System Integration
+- Oracle Financials Cloud GL Journal Import XML
+- Workday, Banner, Kuali support via configurable mappings
+- Chart of Accounts mapping (SLURM account → Fund/Org/Account/Program)
+- Webhook notifications on invoice events
+- Journal Entry CSV export for any ERP system
 
-```text
-SlurmLedger/
-├── src/                                   # Source UI code built with React or modern JS
-│   ├── invoices/                          # Stored invoice PDFs
-│   ├── invoice-schema.json                # Invoice metadata schema
-│   ├── slurmcostmanager.html              # HTML entrypoint loaded inside Cockpit
-│   └── slurmcostmanager.js                # Frontend plugin logic, using cockpit APIs
-├── manifest.json                          # Cockpit module metadata, menu registration
-├── Makefile                               # Build, devel-install, devel-uninstall, watch, check targets
-├── dist/                                  # Bundled output directory for Cockpit to load
-├── test/                                  # Integration tests using Cockpit test harness
-│   └── check-application                  # Python-based browser tests via DevTools protocol
-├── org.cockpit_project.slurmcostmanager.metainfo.xml  # Metadata for packaging
-├── README.md                              # Documentation (this file)
-└── CONTRIBUTING.md                        # Guidelines for community contributions
+### Role-Based Access
+| Feature | Admin | PI | Member | Finance |
+|---|---|---|---|---|
+| Dashboard | All accounts | Their accounts | Personal usage | All (read-only) |
+| Cost Details | All + edit rates | Their accounts | Their jobs | All (read-only) |
+| Rate Config | Full edit | View only | Hidden | View only |
+| Allocations | Full edit | View balance | View usage | View all |
+| Invoices | Full lifecycle | View theirs | Hidden | View + mark paid |
+| Billing Rules | Full edit | View only | Hidden | View only |
+| Institution | Full edit | Hidden | Hidden | View only |
+| Financial Integration | Full config | Hidden | Hidden | View only |
+
+### Reports & Exports
+- Monthly/Quarterly/Annual billing summaries
+- CSV export (RFC 4180 compliant)
+- PDF invoices and credit memos
+- Journal entry exports for financial systems
+- Historical cost trend charts
+- Job efficiency metrics
+
+## Screenshots
+
+*(Screenshots to be added)*
+
+## Requirements
+
+- Cockpit ≥ 300
+- Python 3.8+
+- SLURM with SlurmDBD (MySQL/MariaDB backend)
+- pymysql
+- reportlab
+
+## Installation
+
+### From RPM (RHEL/Rocky/Alma)
+```bash
+sudo dnf install slurmledger-1.0.0-1.noarch.rpm
+sudo systemctl try-restart cockpit
 ```
 
-## 🧰 Installation & Development
+### From DEB (Ubuntu/Debian)
+```bash
+sudo dpkg -i slurmledger_1.0.0-1_all.deb
+sudo apt-get install -f  # install dependencies
+sudo systemctl try-restart cockpit
+```
 
-Recommend using the **Cockpit Starter Kit** workflow to scaffold and build your plugin:
+### From Source
+```bash
+git clone https://github.com/NessieCanCode/SlurmLedger.git
+cd SlurmLedger
+pip install -r requirements.txt
+make build
+sudo make install
+```
 
-- Use `make devel-install` to symlink your dist output into `~/.local/share/cockpit/` for live development.
-- Use `make devel-uninstall` when finished to remove the development symlink.
-- Optionally run `make watch` to rebuild and reinstall whenever files in `src/` change (requires `inotifywait`).
-- Run `make build` or `make` to compile and prepare for release.
-- Use `make check` to run integration tests via Cockpit's VM-based test system.
-Cockpit’s `manifest.json` registers your tool under the main menu. Your UI files will live in `src/`, built via webpack into `dist/`.
+### Development
+```bash
+make devel-install  # Links to ~/.local/share/cockpit/
+```
 
-## 📦 Packaging
+## Configuration
 
-Build RPM and DEB packages for distribution:
+### Rates (`/etc/slurmledger/rates.json`)
+```json
+{
+    "defaultRate": 0.01,
+    "defaultGpuRate": 0.10,
+    "overrides": {
+        "physics-lab": { "rate": 0.008, "gpuRate": 0.08, "discount": 0.1 }
+    },
+    "billing_rules": [...],
+    "allocations": {...},
+    "billing_defaults": {
+        "type": "postpaid",
+        "billing_period": "monthly",
+        "payment_terms_days": 30
+    }
+}
+```
+
+### Institution Profile (`/etc/slurmledger/institution.json`)
+Configure your institution's name, address, logo, bank details, payment terms, and financial system integration through the UI.
+
+### Roles
+Configure role assignments in `institution.json`:
+```json
+{
+    "roles": {
+        "admins": ["root", "hpc-admin"],
+        "finance": ["billing-dept"],
+        "pis": []
+    }
+}
+```
+PIs are auto-detected from SLURM account coordinator assignments.
+
+### Billing Rules
+Rules are evaluated in order — first matching rule wins:
+
+| Rule | Default | Description |
+|---|---|---|
+| No charge for failed jobs | ✅ Enabled | Failed/cancelled jobs not charged (except OOM and timeout) |
+| No charge under 1 minute | ✅ Enabled | Very short jobs excluded |
+| Debug partition discount | ❌ Disabled | 50% rate on debug partition |
+| Viz partition free | ❌ Disabled | No charge for visualization partition |
+| OOM charge at requested time | ❌ Disabled | OOM jobs charged for requested, not actual time |
+
+Create custom rules via the admin UI — no config file editing required.
+
+## Architecture
+
+```
+┌─────────────────────────────────────┐
+│         Cockpit Web UI              │
+│  (React, Chart.js, jsPDF)           │
+│                                     │
+│  ┌─────────┐ ┌──────────┐ ┌──────┐ │
+│  │Dashboard│ │ Invoices │ │Rates │ │
+│  │(by role)│ │lifecycle │ │rules │ │
+│  └────┬────┘ └────┬─────┘ └──┬───┘ │
+│       │           │           │     │
+│       ▼           ▼           ▼     │
+│  cockpit.spawn() / cockpit.file()   │
+└───────────────┬─────────────────────┘
+                │
+    ┌───────────┼───────────────┐
+    ▼           ▼               ▼
+┌────────┐ ┌──────────┐ ┌──────────────┐
+│slurmdb │ │invoice.py│ │financial_    │
+│  .py   │ │(reportlab│ │ export.py    │
+│        │ │  PDF gen)│ │(Oracle/CSV/  │
+│ MySQL  │ │          │ │ webhooks)    │
+│queries │ │          │ │              │
+└───┬────┘ └──────────┘ └──────────────┘
+    │
+    ▼
+┌─────────────┐
+│  SlurmDB    │
+│ (MySQL/     │
+│  MariaDB)   │
+└─────────────┘
+```
+
+## Testing
 
 ```bash
-make rpm  # writes an RPM to rpmbuild/RPMS/
-make deb  # creates slurmcostmanager_<version>_all.deb
+# Unit tests
+make check
+
+# Or individually:
+PYTHONPATH=src python -m pytest test/unit/ -v
+for f in test/unit/*.test.js; do node "$f"; done
+
+# Lint
+flake8 src/*.py
+npx eslint src/ test/
 ```
 
-Both targets generate `org.cockpit_project.slurmcostmanager.metainfo.xml` and bundle `manifest.json` so the packages can be installed on RPM or DEB based systems.
+## Contributing
 
-### Manual verification
+See [CONTRIBUTING.md](CONTRIBUTING.md).
 
-1. Run `make devel-install` and confirm that `~/.local/share/cockpit/slurmcostmanager` is a symlink.
-2. Open Cockpit at `https://<host>:9090` and verify the **SlurmLedger** entry appears.
-3. When done developing, execute `make devel-uninstall` to remove the symlink.
+## License
 
-## 🧭 Versioning and Releases
-
-The project follows [Semantic Versioning](https://semver.org/). All notable changes are recorded in [CHANGELOG.md](CHANGELOG.md) and upgrade notes live in [UPGRADING.md](UPGRADING.md).
-
-To cut a new release:
-
-1. Bump the version in `manifest.json` and update the changelog and upgrade guide.
-2. Trigger the **Release** workflow from the GitHub Actions tab and supply the new version number.
-
-The workflow tags the repository, builds packages, and publishes artifacts to GitHub Releases automatically.
-
-## 🌐 Usage
-
-1. On a Linux host with **Cockpit** installed (e.g. CentOS, Fedora, Debian compatible).
-2. After `make devel-install`, open your browser to `https://<host>:9090`.
-3. Locate **SlurmLedger** in the sidebar menu.
-4. Interact with billing summaries, drill-ins, invoice retrieval, and configure rates directly within Cockpit.
-
-### Fetching real Slurm usage
-
-The `src/slurmdb.py` utility can connect to a running **SlurmDBD** instance and
-export usage metrics as JSON. Connection details are automatically scraped from
-`slurmdbd.conf` located alongside `slurm.conf` (discovered from
-`slurmctld.service` via the `ConditionPathExists` directive, defaulting to
-`/etc/slurm/slurm.conf`). A custom path can be specified via the environment
-variable `SLURMDB_CONF` or the `--conf` flag. Environment variables
-`SLURMDB_HOST`, `SLURMDB_PORT`, `SLURMDB_USER`, `SLURMDB_PASS` and `SLURMDB_DB`
-override any values found in the configuration file. The cluster prefix used to
-select the job tables is determined from the Slurm configuration file. The
-setting can be overridden using `SLURM_CLUSTER`, `--cluster` or `--slurm-conf`.
-
-
-```bash
-python3 src/slurmdb.py --start 2024-06-01 --end 2024-06-30 --output billing.json
-# optional custom config path
-# python3 src/slurmdb.py --start ... --end ... --conf /path/to/slurmdbd.conf --cluster localcluster
-```
-
-The resulting `billing.json` file mirrors the structure expected by the
-frontend and can be used for local development or offline snapshots.
-
-#### Automatic daily exports
-
-To export usage one day at a time, the helper can remember the last processed
-date in `~/.local/share/slurmledger/last_run.json`. Running with `--auto-daily`
-without `--start`/`--end` processes the next unexported day and writes a JSON
-file per day into the chosen directory:
-
-```bash
-python3 src/slurmdb.py --auto-daily --output daily-reports/
-```
-
-If multiple days were missed, each unprocessed day is exported until caught up.
-After a successful export the state file is updated so subsequent runs pick up
-where they left off.
-
-### Inspecting the database schema
-
-If you need to see which tables and columns are present in your Slurm
-accounting database, run the helper script `src/slurm_schema.py`.  It
-uses the same connection options as `slurmdb.py` and writes a JSON
-mapping of tables to their columns.
-
-```bash
-python3 src/slurm_schema.py --output schema.json
-# python3 src/slurm_schema.py --conf /path/to/slurmdbd.conf --cluster localcluster
-```
-
-The resulting `schema.json` file can be compared with the list of
-tables and columns from your deployment.
-
-### Testing with sample SlurmDB data
-
-For unit tests and local development the repository includes two fixtures
-under `test/`:
-
-- `example_slurm_schema_for_testing.json` – a pre-generated mapping of
-  tables to columns for a minimal Slurm accounting database.
-- `example_slurmdb_for_testing.sql` – a small SQL dump containing the
-  corresponding table definitions and a few dummy rows.
-
-These files allow tests to verify table and column presence and operate on
-sample data without requiring access to a live SlurmDB instance.
-
-## 📝 Development Notes
-
-- Your UI components can access system files or commands using `cockpit.file()` and other Cockpit APIs.
-- Write integration tests using the Python-based browser automation tools bundled with Cockpit Starter Kit.
-- Ensure cross‑OS compatibility by leveraging Cockpit’s built-in CI and test VM infrastructure.
-
-We welcome community contributions. Please see [CONTRIBUTING.md](CONTRIBUTING.md) for guidelines.
-
-## 📄 License
-
-**SlurmLedger** is licensed under **MIT**—see the [LICENSE](LICENSE) file for details.
+LGPL-2.1 — See [LICENSE](LICENSE).

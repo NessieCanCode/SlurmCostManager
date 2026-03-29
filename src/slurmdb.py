@@ -806,6 +806,91 @@ class SlurmDB:
             return 0
         return int(cores)
 
+    def _apply_billing_rules(
+        self,
+        job: Dict[str, Any],
+        rules: List[Dict[str, Any]],
+    ) -> Dict[str, Any]:
+        """Evaluate billing rules against a single job dict.
+
+        Returns one of:
+          {"charge": True, "discount_percent": 0}
+          {"charge": False, "reason": "<rule name>"}
+          {"charge": True, "discount_percent": <n>, "reason": "<rule name>"}
+        """
+        _OPERATORS = {
+            "equals": lambda a, b: a == b,
+            "not_equals": lambda a, b: a != b,
+            "in": lambda a, b: a in b,
+            "not_in": lambda a, b: a not in b,
+            "less_than": lambda a, b: float(a) < float(b),
+            "greater_than": lambda a, b: float(a) > float(b),
+            "contains": lambda a, b: b in a,
+        }
+
+        for rule in rules:
+            if not rule.get("enabled", True):
+                continue
+
+            cond = rule.get("condition", {})
+            field = cond.get("field")
+            operator = cond.get("operator")
+            value = cond.get("value")
+            values = cond.get("values")
+
+            # Resolve the field value from the job dict.
+            # The "elapsed_seconds" virtual field is derived from the elapsed key.
+            if field == "elapsed_seconds":
+                job_val = job.get("elapsed") or 0
+            else:
+                job_val = job.get(field, "")
+
+            op_fn = _OPERATORS.get(operator)
+            if op_fn is None:
+                continue
+
+            try:
+                operand = values if operator in ("in", "not_in") else value
+                matched = op_fn(job_val, operand)
+            except (TypeError, ValueError):
+                matched = False
+
+            if not matched:
+                continue
+
+            # For no_charge rules with exclude_states: if the job's state is
+            # one of the excluded states, the rule does not apply.
+            exclude_states = rule.get("exclude_states", [])
+            if exclude_states and job.get("state") in exclude_states:
+                continue
+
+            action = rule.get("action")
+            rule_name = rule.get("name", rule.get("id", "unknown rule"))
+
+            if action == "no_charge":
+                return {"charge": False, "reason": rule_name}
+            elif action == "discount":
+                discount_percent = rule.get("discount_percent", 0)
+                return {
+                    "charge": True,
+                    "discount_percent": discount_percent,
+                    "reason": rule_name,
+                }
+            elif action == "charge_requested_time":
+                # Signal to the caller that the job should be billed at
+                # requested time rather than actual elapsed time.  The job
+                # record may not carry tres_req wall-time; the caller handles
+                # the fallback.
+                return {
+                    "charge": True,
+                    "discount_percent": 0,
+                    "use_requested_time": True,
+                    "reason": rule_name,
+                }
+
+        # No rule matched — normal charge.
+        return {"charge": True, "discount_percent": 0}
+
     def _build_account_details(
         self,
         usage: Dict[str, Dict[str, Any]],
@@ -816,6 +901,7 @@ class SlurmDB:
         overrides = rates_cfg.get('overrides', {})
         historical = rates_cfg.get('historicalRates', {})
         gpu_historical = rates_cfg.get('historicalGpuRates', {})
+        billing_rules = rates_cfg.get('billing_rules', [])
 
         details: List[Dict[str, Any]] = []
         total_ch = total_gpu = total_cost = 0.0
@@ -849,6 +935,27 @@ class SlurmDB:
                         j_cost = jvals['core_hours'] * rate + jvals.get('gpu_hours', 0.0) * gpu_rate
                         if 0 < discount < 1:
                             j_cost *= 1 - discount
+
+                        # Build a flat job dict for rule evaluation.
+                        job_for_rules: Dict[str, Any] = {
+                            'state': jvals.get('state'),
+                            'partition': jvals.get('partition'),
+                            'elapsed': jvals.get('elapsed') or 0,
+                            'job_name': jvals.get('job_name'),
+                        }
+                        rule_result = self._apply_billing_rules(job_for_rules, billing_rules)
+
+                        billing_status: str
+                        if not rule_result.get('charge', True):
+                            j_cost = 0.0
+                            billing_status = f"Not charged: {rule_result['reason']}"
+                        elif rule_result.get('discount_percent', 0):
+                            dp = rule_result['discount_percent']
+                            j_cost *= (1 - dp / 100.0)
+                            billing_status = f"Discounted {dp}%: {rule_result['reason']}"
+                        else:
+                            billing_status = "Charged"
+
                         jobs.append(
                             {
                                 'job': job,
@@ -862,6 +969,7 @@ class SlurmDB:
                                 'state': jvals.get('state'),
                                 'core_hours': round(jvals['core_hours'], 2),
                                 'cost': round(j_cost, 2),
+                                'billing_rule_applied': billing_status,
                             }
                         )
                     users.append(

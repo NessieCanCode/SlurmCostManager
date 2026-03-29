@@ -540,6 +540,7 @@ function PaginatedJobTable({ jobs }) {
       case 'elapsed': aVal = a.elapsed || 0; bVal = b.elapsed || 0; break;
       case 'core_hours': aVal = a.core_hours || 0; bVal = b.core_hours || 0; break;
       case 'cost': aVal = a.cost || 0; bVal = b.cost || 0; break;
+      case 'billing_status': aVal = a.billing_rule_applied || ''; bVal = b.billing_rule_applied || ''; break;
       default: aVal = 0; bVal = 0;
     }
     let cmp;
@@ -584,7 +585,8 @@ function PaginatedJobTable({ jobs }) {
           React.createElement('th', null, 'AllocTRES'),
           React.createElement('th', null, 'State'),
           sortableTh('Core Hours', 'core_hours'),
-          sortableTh('$ Cost', 'cost')
+          sortableTh('$ Cost', 'cost'),
+          sortableTh('Billing Status', 'billing_status')
         )
       ),
       React.createElement(
@@ -604,7 +606,19 @@ function PaginatedJobTable({ jobs }) {
             React.createElement('td', null, formatAllocTres(j.alloc_tres)),
             React.createElement('td', null, j.state || ''),
             React.createElement('td', null, j.core_hours),
-            React.createElement('td', null, j.cost)
+            React.createElement('td', null, j.cost),
+            React.createElement(
+              'td',
+              {
+                style: {
+                  color: j.billing_rule_applied && j.billing_rule_applied !== 'Charged'
+                    ? '#6b7280'
+                    : undefined,
+                  fontSize: '0.85em'
+                }
+              },
+              j.billing_rule_applied || 'Charged'
+            )
           )
         )
       )
@@ -2515,16 +2529,432 @@ function FinancialIntegrationTab() {
   );
 }
 
-function Rates({ onRatesUpdated }) {
+// ---------------------------------------------------------------------------
+// Billing Rules UI
+// ---------------------------------------------------------------------------
+
+function conditionSummary(rule) {
+  const cond = rule.condition || {};
+  const field = cond.field || '';
+  const op = cond.operator || '';
+  const val = cond.value !== undefined ? cond.value : (cond.values || []).join(', ');
+  const exclude = (rule.exclude_states || []).length
+    ? ` (except ${rule.exclude_states.join(', ')})`
+    : '';
+  return `${field} ${op} ${val}${exclude}`;
+}
+
+function actionLabel(rule) {
+  const a = rule.action || '';
+  if (a === 'no_charge') return 'No charge';
+  if (a === 'discount') return `Discount ${rule.discount_percent || 0}%`;
+  if (a === 'charge_requested_time') return 'Charge requested time';
+  return a;
+}
+
+function BillingRuleModal({ rule, onSave, onClose }) {
+  const isNew = !rule.id;
+  const [form, setForm] = useState({
+    id: rule.id || '',
+    name: rule.name || '',
+    enabled: rule.enabled !== false,
+    condition: { ...{ field: 'state', operator: 'equals', value: '', values: [] }, ...(rule.condition || {}) },
+    exclude_states: (rule.exclude_states || []).join(', '),
+    action: rule.action || 'no_charge',
+    discount_percent: rule.discount_percent != null ? rule.discount_percent : 0,
+    description: rule.description || ''
+  });
+  const [error, setError] = useState(null);
+
+  function updateCond(field, value) {
+    setForm(prev => ({ ...prev, condition: { ...prev.condition, [field]: value } }));
+  }
+
+  function handleSave() {
+    if (!form.id.trim()) { setError('Rule ID is required'); return; }
+    if (!form.name.trim()) { setError('Rule name is required'); return; }
+
+    const out = {
+      id: form.id.trim(),
+      name: form.name.trim(),
+      enabled: form.enabled,
+      condition: { ...form.condition },
+      action: form.action,
+      description: form.description.trim()
+    };
+
+    // Normalise condition values for 'in' / 'not_in' operators
+    if (out.condition.operator === 'in' || out.condition.operator === 'not_in') {
+      const raw = typeof out.condition.values === 'string'
+        ? out.condition.values
+        : (out.condition.values || []).join(', ');
+      out.condition.values = raw.split(',').map(s => s.trim()).filter(Boolean);
+      delete out.condition.value;
+    } else {
+      delete out.condition.values;
+    }
+
+    const excludeRaw = form.exclude_states || '';
+    const excludeArr = excludeRaw.split(',').map(s => s.trim()).filter(Boolean);
+    if (excludeArr.length) out.exclude_states = excludeArr;
+
+    if (out.action === 'discount') {
+      const dp = parseInt(form.discount_percent, 10);
+      if (!Number.isFinite(dp) || dp < 0 || dp > 100) {
+        setError('Discount percent must be 0–100');
+        return;
+      }
+      out.discount_percent = dp;
+    }
+
+    onSave(out);
+  }
+
+  const operators = ['equals', 'not_equals', 'in', 'not_in', 'less_than', 'greater_than', 'contains'];
+  const valuesMode = form.condition.operator === 'in' || form.condition.operator === 'not_in';
+  const condValuesRaw = valuesMode
+    ? (Array.isArray(form.condition.values) ? form.condition.values.join(', ') : form.condition.values || '')
+    : '';
+
+  return React.createElement(
+    'div',
+    { className: 'modal-overlay', onClick: onClose },
+    React.createElement(
+      'div',
+      { className: 'modal', onClick: e => e.stopPropagation(), style: { maxWidth: '560px', width: '95%' } },
+      React.createElement('h3', null, isNew ? 'Add Billing Rule' : `Edit Rule: ${rule.name}`),
+      error && React.createElement('p', { className: 'error' }, error),
+      React.createElement('div', { style: { marginBottom: '0.75em' } },
+        React.createElement('label', null, 'Rule ID: '),
+        React.createElement('input', {
+          type: 'text', value: form.id, disabled: !isNew,
+          onChange: e => setForm(prev => ({ ...prev, id: e.target.value })),
+          placeholder: 'e.g. no-charge-weekend', style: { width: '100%', marginTop: '4px' }
+        })
+      ),
+      React.createElement('div', { style: { marginBottom: '0.75em' } },
+        React.createElement('label', null, 'Name: '),
+        React.createElement('input', {
+          type: 'text', value: form.name,
+          onChange: e => setForm(prev => ({ ...prev, name: e.target.value })),
+          style: { width: '100%', marginTop: '4px' }
+        })
+      ),
+      React.createElement('div', { style: { marginBottom: '0.75em' } },
+        React.createElement('label', null,
+          React.createElement('input', {
+            type: 'checkbox', checked: form.enabled,
+            onChange: e => setForm(prev => ({ ...prev, enabled: e.target.checked })),
+            style: { marginRight: '6px' }
+          }),
+          'Enabled'
+        )
+      ),
+      React.createElement('fieldset', { style: { marginBottom: '0.75em', padding: '0.5em 0.75em' } },
+        React.createElement('legend', null, 'Condition'),
+        React.createElement('div', { style: { marginBottom: '0.5em' } },
+          React.createElement('label', null, 'Field: '),
+          React.createElement('input', {
+            type: 'text', value: form.condition.field,
+            onChange: e => updateCond('field', e.target.value),
+            placeholder: 'state, partition, elapsed_seconds, job_name'
+          })
+        ),
+        React.createElement('div', { style: { marginBottom: '0.5em' } },
+          React.createElement('label', null, 'Operator: '),
+          React.createElement('select', {
+            value: form.condition.operator,
+            onChange: e => updateCond('operator', e.target.value)
+          },
+            operators.map(op => React.createElement('option', { key: op, value: op }, op))
+          )
+        ),
+        valuesMode
+          ? React.createElement('div', { style: { marginBottom: '0.5em' } },
+              React.createElement('label', null, 'Values (comma-separated): '),
+              React.createElement('input', {
+                type: 'text', value: condValuesRaw,
+                onChange: e => updateCond('values', e.target.value),
+                placeholder: 'FAILED, CANCELLED, NODE_FAIL'
+              })
+            )
+          : React.createElement('div', { style: { marginBottom: '0.5em' } },
+              React.createElement('label', null, 'Value: '),
+              React.createElement('input', {
+                type: 'text', value: form.condition.value || '',
+                onChange: e => updateCond('value', e.target.value),
+                placeholder: 'e.g. debug, OUT_OF_MEMORY, 60'
+              })
+            )
+      ),
+      React.createElement('div', { style: { marginBottom: '0.75em' } },
+        React.createElement('label', null, 'Exclude states (comma-separated, optional): '),
+        React.createElement('input', {
+          type: 'text', value: form.exclude_states,
+          onChange: e => setForm(prev => ({ ...prev, exclude_states: e.target.value })),
+          placeholder: 'OUT_OF_MEMORY, TIMEOUT',
+          style: { width: '100%', marginTop: '4px' }
+        })
+      ),
+      React.createElement('div', { style: { marginBottom: '0.75em' } },
+        React.createElement('label', null, 'Action: '),
+        React.createElement('select', {
+          value: form.action,
+          onChange: e => setForm(prev => ({ ...prev, action: e.target.value }))
+        },
+          React.createElement('option', { value: 'no_charge' }, 'No charge'),
+          React.createElement('option', { value: 'discount' }, 'Discount'),
+          React.createElement('option', { value: 'charge_requested_time' }, 'Charge requested time')
+        )
+      ),
+      form.action === 'discount' && React.createElement('div', { style: { marginBottom: '0.75em' } },
+        React.createElement('label', null, 'Discount %: '),
+        React.createElement('input', {
+          type: 'number', min: 0, max: 100,
+          value: form.discount_percent,
+          onChange: e => setForm(prev => ({ ...prev, discount_percent: e.target.value }))
+        })
+      ),
+      React.createElement('div', { style: { marginBottom: '0.75em' } },
+        React.createElement('label', null, 'Description: '),
+        React.createElement('textarea', {
+          value: form.description, rows: 2,
+          onChange: e => setForm(prev => ({ ...prev, description: e.target.value })),
+          style: { width: '100%', marginTop: '4px' }
+        })
+      ),
+      React.createElement('div', { style: { display: 'flex', gap: '0.5em', justifyContent: 'flex-end' } },
+        React.createElement('button', { onClick: onClose }, 'Cancel'),
+        React.createElement('button', { onClick: handleSave }, 'Save')
+      )
+    )
+  );
+}
+
+function BillingRulesTab({ rules, onRulesChange, billingData }) {
+  const [editTarget, setEditTarget] = useState(null);
+
+  // Count affected jobs in current billing data for a rule
+  function countAffectedJobs(rule) {
+    if (!billingData || !billingData.details) return null;
+    let count = 0;
+    (billingData.details || []).forEach(acct => {
+      (acct.users || []).forEach(u => {
+        (u.jobs || []).forEach(j => {
+          if (!rule.enabled) return;
+          const cond = rule.condition || {};
+          const field = cond.field;
+          const op = cond.operator;
+          let jobVal;
+          if (field === 'elapsed_seconds') jobVal = j.elapsed || 0;
+          else jobVal = j[field] || '';
+
+          let matched = false;
+          try {
+            if (op === 'equals') matched = jobVal === cond.value;
+            else if (op === 'not_equals') matched = jobVal !== cond.value;
+            else if (op === 'in') matched = (cond.values || []).includes(jobVal);
+            else if (op === 'not_in') matched = !(cond.values || []).includes(jobVal);
+            else if (op === 'less_than') matched = Number(jobVal) < Number(cond.value);
+            else if (op === 'greater_than') matched = Number(jobVal) > Number(cond.value);
+            else if (op === 'contains') matched = String(jobVal).includes(String(cond.value));
+          } catch (_) { matched = false; }
+
+          if (matched) {
+            const excludes = rule.exclude_states || [];
+            if (!excludes.length || !excludes.includes(j.state)) count++;
+          }
+        });
+      });
+    });
+    return count;
+  }
+
+  function handleSave(updatedRule) {
+    const idx = rules.findIndex(r => r.id === updatedRule.id);
+    let newRules;
+    if (idx >= 0) {
+      newRules = rules.map((r, i) => i === idx ? updatedRule : r);
+    } else {
+      newRules = [...rules, updatedRule];
+    }
+    onRulesChange(newRules);
+    setEditTarget(null);
+  }
+
+  function handleToggle(idx) {
+    const newRules = rules.map((r, i) => i === idx ? { ...r, enabled: !r.enabled } : r);
+    onRulesChange(newRules);
+  }
+
+  function handleRemove(idx) {
+    const rule = rules[idx];
+    if (!window.confirm(`Remove rule "${rule.name}"?`)) return;
+    onRulesChange(rules.filter((_, i) => i !== idx));
+  }
+
+  function moveRule(idx, direction) {
+    const newRules = rules.slice();
+    const swapIdx = idx + direction;
+    if (swapIdx < 0 || swapIdx >= newRules.length) return;
+    [newRules[idx], newRules[swapIdx]] = [newRules[swapIdx], newRules[idx]];
+    onRulesChange(newRules);
+  }
+
+  return React.createElement(
+    'div',
+    null,
+    React.createElement('h3', null, 'Billing Rules'),
+    React.createElement(
+      'p',
+      { style: { color: '#6b7280', fontSize: '0.9em' } },
+      'Rules are evaluated in order — first matching rule wins. Disabled rules are skipped.'
+    ),
+    React.createElement(
+      'div',
+      { className: 'table-container' },
+      React.createElement(
+        'table',
+        { className: 'rates-table' },
+        React.createElement(
+          'thead',
+          null,
+          React.createElement(
+            'tr',
+            null,
+            React.createElement('th', null, 'Order'),
+            React.createElement('th', null, 'Enabled'),
+            React.createElement('th', null, 'Name'),
+            React.createElement('th', null, 'Condition'),
+            React.createElement('th', null, 'Action'),
+            React.createElement('th', null, 'Description'),
+            React.createElement('th', null, 'Preview'),
+            React.createElement('th', null)
+          )
+        ),
+        React.createElement(
+          'tbody',
+          null,
+          rules.length === 0
+            ? React.createElement(
+                'tr',
+                null,
+                React.createElement(
+                  'td',
+                  { colSpan: 8, style: { textAlign: 'center', color: '#9ca3af', padding: '1em' } },
+                  'No billing rules configured. Click "Add Rule" to create one.'
+                )
+              )
+            : rules.map((rule, idx) => {
+                const affected = countAffectedJobs(rule);
+                return React.createElement(
+                  'tr',
+                  { key: rule.id, style: { opacity: rule.enabled ? 1 : 0.5 } },
+                  React.createElement(
+                    'td',
+                    { style: { whiteSpace: 'nowrap' } },
+                    React.createElement(
+                      'button',
+                      {
+                        className: 'link-btn',
+                        disabled: idx === 0,
+                        onClick: () => moveRule(idx, -1),
+                        style: { marginRight: '2px' }
+                      },
+                      '\u25b2'
+                    ),
+                    React.createElement(
+                      'button',
+                      {
+                        className: 'link-btn',
+                        disabled: idx === rules.length - 1,
+                        onClick: () => moveRule(idx, 1)
+                      },
+                      '\u25bc'
+                    )
+                  ),
+                  React.createElement(
+                    'td',
+                    null,
+                    React.createElement('input', {
+                      type: 'checkbox',
+                      checked: !!rule.enabled,
+                      onChange: () => handleToggle(idx)
+                    })
+                  ),
+                  React.createElement('td', null, React.createElement('strong', null, rule.name)),
+                  React.createElement('td', { style: { fontFamily: 'monospace', fontSize: '0.85em' } }, conditionSummary(rule)),
+                  React.createElement('td', null, actionLabel(rule)),
+                  React.createElement('td', { style: { color: '#6b7280', fontSize: '0.85em' } }, rule.description || ''),
+                  React.createElement(
+                    'td',
+                    { style: { fontSize: '0.85em' } },
+                    affected !== null
+                      ? React.createElement(
+                          'span',
+                          {
+                            style: {
+                              backgroundColor: affected > 0 ? '#fef3c7' : '#f3f4f6',
+                              padding: '1px 6px',
+                              borderRadius: '10px',
+                              color: affected > 0 ? '#92400e' : '#6b7280'
+                            }
+                          },
+                          `${affected} job${affected !== 1 ? 's' : ''}`
+                        )
+                      : React.createElement('span', { style: { color: '#9ca3af' } }, '\u2014')
+                  ),
+                  React.createElement(
+                    'td',
+                    { style: { whiteSpace: 'nowrap' } },
+                    React.createElement(
+                      'button',
+                      {
+                        className: 'link-btn',
+                        onClick: () => setEditTarget(rule),
+                        style: { marginRight: '6px' }
+                      },
+                      'Edit'
+                    ),
+                    React.createElement(
+                      'button',
+                      {
+                        className: 'link-btn',
+                        onClick: () => handleRemove(idx),
+                        style: { color: '#dc2626' }
+                      },
+                      'Remove'
+                    )
+                  )
+                );
+              })
+        )
+      )
+    ),
+    React.createElement(
+      'button',
+      { onClick: () => setEditTarget({}), style: { marginTop: '0.75em' } },
+      'Add Rule'
+    ),
+    editTarget !== null && React.createElement(BillingRuleModal, {
+      rule: editTarget,
+      onSave: handleSave,
+      onClose: () => setEditTarget(null)
+    })
+  );
+}
+
+function Rates({ onRatesUpdated, billingData }) {
   const [config, setConfig] = useState(null);
   const [originalConfig, setOriginalConfig] = useState(null);
   const [overrides, setOverrides] = useState([]);
   const [allocations, setAllocations] = useState({});
+  const [billingRules, setBillingRules] = useState([]);
   const [accounts, setAccounts] = useState([]);
   const [error, setError] = useState(null);
   const [saving, setSaving] = useState(false);
   const [status, setStatus] = useState(null);
-  const [ratesTab, setRatesTab] = useState('rates'); // 'rates' | 'allocations'
+  const [ratesTab, setRatesTab] = useState('rates'); // 'rates' | 'allocations' | 'billing-rules' | 'financial'
   const baseDir = PLUGIN_BASE;
 
   useEffect(() => {
@@ -2556,6 +2986,7 @@ function Rates({ onRatesUpdated }) {
           : [];
         setOverrides(ovrs);
         setAllocations(json.allocations || {});
+        setBillingRules(json.billing_rules || []);
       } catch (e) {
         console.error(e);
         if (!cancelled) setError('Failed to load rates');
@@ -2682,6 +3113,13 @@ function Rates({ onRatesUpdated }) {
         json.allocations = allocations;
       } else {
         delete json.allocations;
+      }
+
+      // Persist billing rules from the UI state
+      if (billingRules.length) {
+        json.billing_rules = billingRules;
+      } else {
+        delete json.billing_rules;
       }
 
       const text = JSON.stringify(json, null, 2);
@@ -2845,12 +3283,12 @@ function Rates({ onRatesUpdated }) {
     'div',
     null,
     React.createElement(InstitutionProfile, null),
-    // Tab bar for Rates / Allocations / Financial Integration
+    // Tab bar for Rates / Allocations / Billing Rules / Financial Integration
     React.createElement(
       'div',
       { style: { borderBottom: '2px solid #e5e7eb', marginBottom: '1em', marginTop: '1.5em' } },
-      ['rates', 'allocations', 'financial'].map(tab => {
-        const labels = { rates: 'Rate Configuration', allocations: 'Allocations', financial: 'Financial Integration' };
+      ['rates', 'allocations', 'billing-rules', 'financial'].map(tab => {
+        const labels = { rates: 'Rate Configuration', allocations: 'Allocations', 'billing-rules': 'Billing Rules', financial: 'Financial Integration' };
         return React.createElement(
           'button',
           {
@@ -2883,6 +3321,21 @@ function Rates({ onRatesUpdated }) {
       accounts
     }),
     ratesTab === 'allocations' && React.createElement(
+      'div',
+      { style: { marginTop: '1em' } },
+      React.createElement('button', { onClick: save, disabled: saving }, 'Save'),
+      saving && React.createElement('span', null, ' Saving...'),
+      status && React.createElement('span', { style: { marginLeft: '0.5em' } }, status)
+    ),
+    ratesTab === 'billing-rules' && React.createElement(BillingRulesTab, {
+      rules: billingRules,
+      onRulesChange: updated => {
+        setBillingRules(updated);
+        setStatus(null);
+      },
+      billingData
+    }),
+    ratesTab === 'billing-rules' && React.createElement(
       'div',
       { style: { marginTop: '1em' } },
       React.createElement('button', { onClick: save, disabled: saving }, 'Save'),
@@ -4098,7 +4551,7 @@ function App() {
         institutionProfile
       }),
     activeView === 'invoices' && React.createElement(Invoices, { currentUser: username }),
-    activeView === 'settings' && React.createElement(Rates, { onRatesUpdated: reload })
+    activeView === 'settings' && React.createElement(Rates, { onRatesUpdated: reload, billingData: data })
   );
 }
 
