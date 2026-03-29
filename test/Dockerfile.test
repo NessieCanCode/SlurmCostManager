@@ -1,0 +1,20 @@
+FROM debian:bookworm
+
+RUN apt-get update && apt-get install -y \
+    cockpit \
+    python3 python3-pymysql python3-pip \
+    nodejs npm \
+    && pip3 install --break-system-packages reportlab pytest \
+    && apt-get clean \
+    && rm -rf /var/lib/apt/lists/*
+
+# Create config and log directories with appropriate permissions
+RUN mkdir -p /etc/slurmledger /etc/slurmledger/invoices /var/log/slurmledger \
+    && chmod 750 /etc/slurmledger
+
+# Copy the plugin source
+COPY src/ /usr/share/cockpit/slurmledger/
+
+EXPOSE 9090
+
+CMD ["cockpit-ws", "--no-tls", "--port", "9090"]

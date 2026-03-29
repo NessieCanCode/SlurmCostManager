@@ -201,19 +201,53 @@ python3 /usr/share/cockpit/slurmledger/balance_enforcer.py --check
 
 The **Check Balances** button in the Admin Dashboard runs the same check interactively and displays results in the UI.
 
-## Testing
+## Local Development & Testing
+
+### Docker Compose (recommended)
+
+Spins up MariaDB loaded with the test fixture, builds a Cockpit container with all dependencies, and runs the full test suite against the real database.
 
 ```bash
-# Unit tests
+cd test
+./run-local-tests.sh
+```
+
+This will:
+1. Start MariaDB 10.11 and populate `slurm_acct_db` from the test fixture
+2. Build and start the Cockpit container with the plugin mounted read-only
+3. Run Python unit tests with `pytest`
+4. Run `slurmdb.py` against the live database and print a sample of the JSON output
+5. Smoke-test PDF invoice generation
+6. Smoke-test the balance enforcer in dry-run mode
+
+Cockpit is available at `http://localhost:9090` once the environment is ready.
+
+To stop the environment:
+```bash
+docker compose -f test/docker-compose.yml down
+```
+
+### Manual unit tests
+
+```bash
+# Unit tests only (no database required)
 make check
 
-# Or individually:
-PYTHONPATH=src python -m pytest test/unit/ -v
+# Or directly:
+PYTHONPATH=src python3 -m pytest test/unit/ -v
 for f in test/unit/*.test.js; do node "$f"; done
 
 # Lint
 flake8 src/*.py
 npx eslint src/ test/
+```
+
+### Development install (live reload from source)
+
+```bash
+make devel-install
+# Plugin is now linked at ~/.local/share/cockpit/slurmledger
+# Open Cockpit at https://localhost:9090
 ```
 
 ## Contributing

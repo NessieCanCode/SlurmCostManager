@@ -1,0 +1,28 @@
+{
+  "institutionName": "Test University",
+  "institutionAbbreviation": "TU",
+  "campusDivision": "Research Computing",
+  "institutionType": "R1 University",
+  "primaryContact": {
+    "fullName": "Jane Admin",
+    "title": "HPC Systems Administrator",
+    "email": "hpc-admin@test.example",
+    "phone": "555-555-0100"
+  },
+  "secondaryContact": {
+    "fullName": "John Finance",
+    "email": "finance@test.example",
+    "phone": "555-555-0101"
+  },
+  "streetAddress": "123 Research Drive",
+  "city": "Testville",
+  "state": "CA",
+  "postalCode": "99999",
+  "country": "US",
+  "fiscalYearStartMonth": "7",
+  "defaultCurrency": "USD",
+  "departmentName": "Office of Information Technology",
+  "costCenter": "CC-HPC-001",
+  "notes": "Test environment — not for production use",
+  "logo": ""
+}
