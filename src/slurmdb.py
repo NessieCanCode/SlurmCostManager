@@ -120,6 +120,7 @@ class SlurmDB:
         self.database = database or os.environ.get("SLURMDB_DB") or cfg.get("db", "slurm_acct_db")
         self._conn = None
         self._tres_map = None
+        self._cpu_col = None
         self._config_file = conf_path
         self._slurm_conf = slurm_conf_path
         self.cluster = (
@@ -441,10 +442,11 @@ class SlurmDB:
 
             # Determine which CPU column exists. Older Slurm installations
             # expose ``cpus_alloc`` while newer ones only provide ``cpus_req``.
-            cpu_col = "cpus_alloc"
-            cur.execute(f"SHOW COLUMNS FROM {job_table} LIKE %s", (cpu_col,))
-            if not cur.fetchone():
-                cpu_col = "cpus_req"
+            # Cache the result to avoid repeated SHOW COLUMNS round-trips.
+            if self._cpu_col is None:
+                cur.execute(f"SHOW COLUMNS FROM {job_table} LIKE %s", ('cpus_alloc',))
+                self._cpu_col = 'cpus_alloc' if cur.fetchone() else 'cpus_req'
+            cpu_col = self._cpu_col
 
             if summary_only:
                 # Minimal column set — enough for account/GPU/core-hour aggregation.
@@ -463,7 +465,7 @@ class SlurmDB:
                 select_cols = (
                     f"j.id_job AS jobid, j.{job_name_col} AS job_name, j.account, j.partition, "
                     f"a.user AS user_name, j.time_start, j.time_end, j.tres_req, j.tres_alloc, "
-                    f"j.{cpu_col} AS cpus_alloc, j.state"
+                    f"j.{cpu_col} AS cpus_alloc, j.state, j.timelimit"
                 )
 
             query = (
@@ -510,10 +512,10 @@ class SlurmDB:
         with self._conn.cursor() as cur:
             job_table = f"{self.cluster}_job_table" if self.cluster else "job_table"
 
-            cpu_col = "cpus_alloc"
-            cur.execute(f"SHOW COLUMNS FROM {job_table} LIKE %s", (cpu_col,))
-            if not cur.fetchone():
-                cpu_col = "cpus_req"
+            if self._cpu_col is None:
+                cur.execute(f"SHOW COLUMNS FROM {job_table} LIKE %s", ('cpus_alloc',))
+                self._cpu_col = 'cpus_alloc' if cur.fetchone() else 'cpus_req'
+            cpu_col = self._cpu_col
 
             # SQL handles core-hour totals and state breakdowns.
             # tres_alloc GPU extraction happens in a second pass over the
@@ -651,6 +653,7 @@ class SlurmDB:
                         'req_tres': row.get('tres_req'),
                         'alloc_tres': row.get('tres_alloc'),
                         'state': row.get('state'),
+                        'timelimit': int(row.get('timelimit') or 0),
                     },
                 )
                 job_entry['core_hours'] += cpus * dur_hours
@@ -922,14 +925,8 @@ class SlurmDB:
                 if not 0 <= discount <= 1:
                     raise ValueError(f"Invalid discount {discount} for account {account}")
 
-                acct_cost = vals['core_hours'] * rate + vals.get('gpu_hours', 0.0) * gpu_rate
-                if 0 < discount < 1:
-                    acct_cost *= 1 - discount
                 users: List[Dict[str, Any]] = []
                 for user, uvals in vals.get('users', {}).items():
-                    u_cost = uvals['core_hours'] * rate + uvals.get('gpu_hours', 0.0) * gpu_rate
-                    if 0 < discount < 1:
-                        u_cost *= 1 - discount
                     jobs: List[Dict[str, Any]] = []
                     for job, jvals in uvals.get('jobs', {}).items():
                         j_cost = jvals['core_hours'] * rate + jvals.get('gpu_hours', 0.0) * gpu_rate
@@ -953,6 +950,22 @@ class SlurmDB:
                             dp = rule_result['discount_percent']
                             j_cost *= (1 - dp / 100.0)
                             billing_status = f"Discounted {dp}%: {rule_result['reason']}"
+                        elif rule_result.get('use_requested_time'):
+                            # Use the job's time limit instead of actual elapsed time
+                            # timelimit is in minutes in SLURM
+                            requested_seconds = jvals.get('timelimit', 0) * 60
+                            if requested_seconds > 0:
+                                requested_hours = requested_seconds / 3600.0
+                                # Derive CPU count from core_hours / elapsed_hours where possible
+                                elapsed_secs = jvals.get('elapsed') or 0
+                                if elapsed_secs > 0:
+                                    job_cpus = jvals['core_hours'] / (elapsed_secs / 3600.0)
+                                else:
+                                    job_cpus = 1.0
+                                j_cost = requested_hours * job_cpus * rate + jvals.get('gpu_hours', 0.0) * gpu_rate
+                                billing_status = f"Charged at requested time: {rule_result.get('reason', '')}"
+                            else:
+                                billing_status = "Charged"  # fallback if no timelimit
                         else:
                             billing_status = "Charged"
 
@@ -972,6 +985,15 @@ class SlurmDB:
                                 'billing_rule_applied': billing_status,
                             }
                         )
+                    # User cost: sum rule-adjusted job costs when per-job data is
+                    # present.  When there are no job records (summary_only path)
+                    # fall back to rate × core_hours so user totals stay meaningful.
+                    if jobs:
+                        u_cost = sum(j['cost'] for j in jobs)
+                    else:
+                        u_cost = uvals['core_hours'] * rate + uvals.get('gpu_hours', 0.0) * gpu_rate
+                        if 0 < discount < 1:
+                            u_cost *= 1 - discount
                     users.append(
                         {
                             'user': user,
@@ -980,6 +1002,24 @@ class SlurmDB:
                             'jobs': jobs,
                         }
                     )
+                # Account cost:
+                # - When per-job data exists for all users, sum rule-adjusted user
+                #   costs so that billing rule adjustments (no_charge, discount,
+                #   use_requested_time) flow up correctly without double-applying.
+                # - When users have no jobs (summary_only path) OR the account has
+                #   GPU hours not tracked at user level, compute directly from the
+                #   account-level core_hours/gpu_hours so GPU charges aren't lost.
+                account_gpu = vals.get('gpu_hours', 0.0)
+                users_have_jobs = users and any(u['jobs'] for u in users)
+                users_track_gpu = users and sum(
+                    uvals.get('gpu_hours', 0.0) for uvals in vals.get('users', {}).values()
+                ) >= account_gpu - 1e-9
+                if users_have_jobs and users_track_gpu:
+                    acct_cost = sum(u['cost'] for u in users)
+                else:
+                    acct_cost = vals['core_hours'] * rate + account_gpu * gpu_rate
+                    if 0 < discount < 1:
+                        acct_cost *= 1 - discount
                 alloc_info = self._compute_allocation_info(
                     account, vals['core_hours'], rates_cfg
                 )
@@ -1077,13 +1117,47 @@ class SlurmDB:
         is significantly faster on clusters with millions of job rows.
         """
 
-        usage, totals = self.aggregate_usage(start_time, end_time, summary_only=summary_only)
         rates_cfg = self._load_rates(rates_file)
         resources = self.cluster_resources()
         cluster_cores = self._validate_cluster_cores(resources)
 
         if summary_only:
-            # Skip per-job detail building — only account-level totals are needed.
+            # Use the SQL-aggregated path for summary_only — much faster on
+            # large clusters as it avoids pulling individual job rows.
+            start_ts = self._validate_time(start_time, "start_time")
+            end_ts = self._validate_time(end_time, "end_time")
+            agg_rows = self.fetch_summary_aggregated(start_ts, end_ts)
+
+            # Convert the flat account list into the usage dict format that
+            # _build_account_details expects: {month: {account: {...}}}.
+            # We use a synthetic month key so all rows land in one bucket.
+            start_dt_tmp = (
+                _fromisoformat(start_time)
+                if isinstance(start_time, str)
+                else datetime.fromtimestamp(start_time)
+            )
+            month_key = start_dt_tmp.strftime('%Y-%m')
+            usage: Dict[str, Any] = {month_key: {}}
+            account_names: List[str] = []
+            for row in agg_rows:
+                acct = row['account']
+                account_names.append(acct)
+                usage[month_key][acct] = {
+                    'core_hours': row['core_hours'],
+                    'gpu_hours': row['gpu_hours'],
+                    'users': {},
+                }
+            totals: Dict[str, Any] = {
+                'daily': {},
+                'monthly': {},
+                'yearly': {},
+                'daily_gpu': {},
+                'monthly_gpu': {},
+                'yearly_gpu': {},
+                'partitions': set(),
+                'accounts': set(account_names),
+                'users': set(),
+            }
             details, total_ch, total_gpu, total_cost = self._build_account_details(
                 usage, rates_cfg
             )
@@ -1091,6 +1165,7 @@ class SlurmDB:
             for d in details:
                 d.pop('users', None)
         else:
+            usage, totals = self.aggregate_usage(start_time, end_time, summary_only=False)
             details, total_ch, total_gpu, total_cost = self._build_account_details(
                 usage, rates_cfg
             )

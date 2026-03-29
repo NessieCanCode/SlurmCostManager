@@ -3,6 +3,8 @@ COCKPIT_DEVEL_DIR=$(HOME)/.local/share/cockpit
 COCKPIT_PROD_DIR=/usr/share/cockpit
 COCKPIT_DEVEL_TARGET=$(COCKPIT_DEVEL_DIR)/slurmcostmanager
 COCKPIT_PROD_TARGET=$(COCKPIT_PROD_DIR)/slurmcostmanager
+INSTALL_DIR = /usr/share/cockpit/slurmledger
+CONFIG_DIR = /etc/slurmledger
 VERSION:=$(shell jq -r .version manifest.json)
 DATE:=$(shell date +%Y-%m-%d)
 RPMBUILD?=rpmbuild
@@ -18,8 +20,14 @@ build: org.cockpit_project.slurmcostmanager.metainfo.xml
 >cp -r src/* $(DIST)/
 >cp manifest.json $(DIST)/
 >cp org.cockpit_project.slurmcostmanager.metainfo.xml $(DIST)/
->mkdir -p $(COCKPIT_PROD_DIR)
->ln -sfn $(abspath $(DIST)) $(COCKPIT_PROD_TARGET)
+
+install: build
+>mkdir -p $(DESTDIR)$(INSTALL_DIR)
+>cp -a dist/* $(DESTDIR)$(INSTALL_DIR)/
+>mkdir -p $(DESTDIR)$(CONFIG_DIR)
+>test -f $(DESTDIR)$(CONFIG_DIR)/rates.json || cp dist/rates.json $(DESTDIR)$(CONFIG_DIR)/rates.json
+>test -f $(DESTDIR)$(CONFIG_DIR)/institution.json || cp dist/institution.json $(DESTDIR)$(CONFIG_DIR)/institution.json
+>chmod 640 $(DESTDIR)$(CONFIG_DIR)/*.json
 
 clean:
 >rm -rf $(DIST) rpmbuild debbuild slurmcostmanager-*.tar.gz slurmcostmanager_*.deb org.cockpit_project.slurmcostmanager.metainfo.xml
@@ -49,7 +57,7 @@ rpm: package
 >rm -rf rpmbuild
 >mkdir -p rpmbuild/BUILD rpmbuild/RPMS rpmbuild/SOURCES rpmbuild/SPECS rpmbuild/SRPMS
 >cp slurmcostmanager-$(VERSION).tar.gz rpmbuild/SOURCES/
->printf 'Summary: SlurmLedger\nName: slurmcostmanager\nVersion: $(VERSION)\nRelease: 1\nLicense: MIT\nSource0: %%{name}-%%{version}.tar.gz\nBuildArch: noarch\nRequires: cockpit\n%%description\nSlurmLedger Cockpit plugin\n%%prep\n%%setup -q\n%%build\n%%install\nmkdir -p %%{buildroot}/usr/share/cockpit/slurmcostmanager\ncp -a * %%{buildroot}/usr/share/cockpit/slurmcostmanager/\n%%files\n/usr/share/cockpit/slurmcostmanager\n' > rpmbuild/SPECS/slurmcostmanager.spec
+>printf 'Summary: SlurmLedger\nName: slurmcostmanager\nVersion: $(VERSION)\nRelease: 1\nLicense: MIT\nSource0: %%{name}-%%{version}.tar.gz\nBuildArch: noarch\nRequires: cockpit\nRequires: python3\nRequires: python3-pymysql\nRequires: python3-reportlab\n%%description\nSlurmLedger Cockpit plugin\n%%prep\n%%setup -q\n%%build\n%%install\nmkdir -p %%{buildroot}/usr/share/cockpit/slurmcostmanager\ncp -a * %%{buildroot}/usr/share/cockpit/slurmcostmanager/\nmkdir -p %%{buildroot}/etc/slurmledger\ncp rates.json %%{buildroot}/etc/slurmledger/rates.json\ncp institution.json %%{buildroot}/etc/slurmledger/institution.json\n%%files\n/usr/share/cockpit/slurmcostmanager\n%%config(noreplace) /etc/slurmledger/rates.json\n%%config(noreplace) /etc/slurmledger/institution.json\n' > rpmbuild/SPECS/slurmcostmanager.spec
 >$(RPMBUILD) --define "_topdir $(PWD)/rpmbuild" -bb rpmbuild/SPECS/slurmcostmanager.spec
 
 deb: package
@@ -64,4 +72,4 @@ deb: package
 check:
 >./test/check-application
 
-.PHONY: all build clean devel-install devel-uninstall watch package rpm deb check
+.PHONY: all build clean install devel-install devel-uninstall watch package rpm deb check

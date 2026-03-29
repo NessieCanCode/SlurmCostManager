@@ -961,6 +961,17 @@ function Details({
     URL.revokeObjectURL(url);
   }
 
+  function generateInvoiceNumber(ledger) {
+    const year = new Date().getFullYear();
+    const prefix = `INV-${year}-`;
+    const existing = (ledger.invoices || [])
+      .filter(inv => inv.id && inv.id.startsWith(prefix))
+      .map(inv => parseInt(inv.id.replace(prefix, ''), 10))
+      .filter(n => !isNaN(n));
+    const next = existing.length > 0 ? Math.max(...existing) + 1 : 1;
+    return `${prefix}${String(next).padStart(4, '0')}`;
+  }
+
   async function exportInvoice() {
     const totals = filteredDetails.reduce(
       (acc, d) => {
@@ -971,34 +982,60 @@ function Details({
       },
       { core: 0, gpu: 0, cost: 0 }
     );
-    const rate = totals.core ? totals.cost / totals.core : 0;
+
+    // Load rates config to get correct per-resource rates
+    let ratesConfig = null;
+    try {
+      let ratesText;
+      if (window.cockpit && window.cockpit.file) {
+        ratesText = await window.cockpit.file(`${PLUGIN_BASE}/rates.json`).read();
+      } else {
+        const resp = await fetch('rates.json');
+        if (resp.ok) ratesText = await resp.text();
+      }
+      if (ratesText) ratesConfig = JSON.parse(ratesText);
+    } catch (e) {
+      console.warn('Could not load rates config for invoice:', e);
+    }
+
+    // Compute separate rates for CPU and GPU
+    let cpuRate = ratesConfig && ratesConfig.defaultRate != null ? ratesConfig.defaultRate : 0.01;
+    let gpuRate = ratesConfig && ratesConfig.defaultGpuRate != null ? ratesConfig.defaultGpuRate : 0.10;
+
+    // Apply account-specific override if filtering by a single account
+    if (ratesConfig && ratesConfig.overrides && filters.account && ratesConfig.overrides[filters.account]) {
+      const ovr = ratesConfig.overrides[filters.account];
+      if (ovr.rate != null) cpuRate = ovr.rate;
+      if (ovr.gpuRate != null) gpuRate = ovr.gpuRate;
+    }
+
+    // Build line items with correct rates; omit zero-qty lines
+    const items = [];
+    if (totals.core > 0) {
+      items.push({ description: 'CPU Core-Hours', qty: totals.core, rate: cpuRate, amount: totals.core * cpuRate });
+    }
+    if (totals.gpu > 0) {
+      items.push({ description: 'GPU Hours', qty: totals.gpu, rate: gpuRate, amount: totals.gpu * gpuRate });
+    }
+
+    // Sequential invoice number derived from ledger
+    const ledger = await loadInvoiceLedger();
+    const invoiceNumber = generateInvoiceNumber(ledger);
+
     const paymentTermsDays = institutionProfile.paymentTermsDays || 30;
     const dueDateMs = Date.now() + paymentTermsDays * 24 * 60 * 60 * 1000;
     const invoiceData = {
-      invoice_number: `INV-${new Date().getFullYear()}-${String(Date.now()).slice(-6)}`,
+      invoice_number: invoiceNumber,
       date_issued: new Date().toLocaleDateString('en-US', { year: 'numeric', month: 'long', day: 'numeric' }),
       fiscal_year: new Date().getFullYear().toString(),
       due_date: new Date(dueDateMs).toLocaleDateString('en-US', { year: 'numeric', month: 'long', day: 'numeric' }),
       payment_terms: institutionProfile.paymentTerms || `Net ${paymentTermsDays}`,
       period: month || '',
-      items: [
-        {
-          description: 'CPU Core-Hours',
-          qty: totals.core,
-          rate: rate,
-          amount: rate * totals.core
-        },
-        {
-          description: 'GPU Hours',
-          qty: totals.gpu,
-          rate: rate,
-          amount: rate * totals.gpu
-        }
-      ],
-      subtotal: totals.cost,
+      items,
+      subtotal: items.reduce((s, i) => s + i.amount, 0),
       discount: 0,
       tax: 0,
-      total_due: totals.cost,
+      total_due: items.reduce((s, i) => s + i.amount, 0),
       institution: {
         name: institutionProfile.institutionName || '',
         abbreviation: institutionProfile.institutionAbbreviation || '',
@@ -1058,7 +1095,7 @@ function Details({
       document.body.removeChild(a);
       URL.revokeObjectURL(url);
       // Record the invoice in the ledger
-      await saveInvoiceToLedger({ ...invoiceData, account: filters.account || '' }, totals.cost);
+      await saveInvoiceToLedger({ ...invoiceData, account: filters.account || '' }, invoiceData.total_due);
       // Trigger financial integration webhook for invoice.created
       if (HAS_COCKPIT) {
         window.cockpit.spawn(

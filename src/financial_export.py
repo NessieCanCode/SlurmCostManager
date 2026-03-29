@@ -21,6 +21,32 @@ import urllib.error as _urllib_error
 
 
 # ---------------------------------------------------------------------------
+# XML indentation compatibility helper (Python 3.8+)
+# ---------------------------------------------------------------------------
+
+def _indent_xml(elem: ET.Element, level: int = 0) -> None:
+    """Compatible XML indentation for Python 3.8+.
+
+    ``ET.indent`` was added in Python 3.9.  This wrapper falls back to a
+    manual recursive implementation so the code works on 3.8 as well.
+    """
+    try:
+        ET.indent(elem, space="  ")
+    except AttributeError:
+        # Python < 3.9 fallback
+        i = "\n" + level * "  "
+        if len(elem):
+            if not elem.text or not elem.text.strip():
+                elem.text = i + "  "
+            for child in elem:
+                _indent_xml(child, level + 1)
+            if not child.tail or not child.tail.strip():  # noqa: F821
+                child.tail = i
+        if level and (not elem.tail or not elem.tail.strip()):
+            elem.tail = i
+
+
+# ---------------------------------------------------------------------------
 # Journal Entry CSV export
 # ---------------------------------------------------------------------------
 
@@ -98,7 +124,7 @@ def generate_oracle_xml(invoice: Dict[str, Any], coa_map: Dict[str, Any]) -> str
         ET.SubElement(line, "Description").text = str(item.get("description", ""))
         ET.SubElement(line, "Reference").text = invoice_number
 
-    ET.indent(root, space="  ")
+    _indent_xml(root)
     return '<?xml version="1.0" encoding="UTF-8"?>\n' + ET.tostring(root, encoding="unicode")
 
 
