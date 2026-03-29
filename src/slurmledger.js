@@ -10,7 +10,7 @@ const PLUGIN_BASE =
     window.cockpit &&
     window.cockpit.manifest &&
     window.cockpit.manifest.path) ||
-  '/usr/share/cockpit/slurmcostmanager';
+  '/usr/share/cockpit/slurmledger';
 
 const HAS_COCKPIT =
   typeof window !== 'undefined' && window.cockpit && window.cockpit.spawn;
@@ -4989,6 +4989,96 @@ function _deltaBadge(current, previous, invertColour = false) {
   );
 }
 
+function BalanceCheckerPanel() {
+  const [checking, setChecking] = useState(false);
+  const [results, setResults] = useState(null);
+  const [error, setError] = useState(null);
+
+  function runCheck() {
+    setChecking(true);
+    setResults(null);
+    setError(null);
+    if (!HAS_COCKPIT) {
+      setError('Cockpit not available — cannot run balance check.');
+      setChecking(false);
+      return;
+    }
+    const proc = cockpit.spawn(
+      ['python3', PLUGIN_BASE + '/balance_enforcer.py', '--check', '--json'],
+      { err: 'message' }
+    );
+    proc.then(output => {
+      try {
+        setResults(JSON.parse(output));
+      } catch (e) {
+        setError('Failed to parse balance_enforcer output: ' + e.message);
+      }
+      setChecking(false);
+    }).catch(err => {
+      setError('balance_enforcer.py failed: ' + (err.message || String(err)));
+      setChecking(false);
+    });
+  }
+
+  const statusColor = { ok: '#3a3', warning: '#e80', critical: '#c60', exceeded: '#c00' };
+
+  return React.createElement(
+    'div',
+    { style: { marginBottom: '1.5em' } },
+    React.createElement('h3', null, 'Allocation Balance Check'),
+    React.createElement(
+      'button',
+      { className: 'pf-c-button pf-m-secondary', onClick: runCheck, disabled: checking },
+      checking ? 'Checking...' : 'Check Balances'
+    ),
+    error && React.createElement('p', { style: { color: '#c00', marginTop: '0.5em' } }, error),
+    results && results.length === 0 &&
+      React.createElement('p', { style: { marginTop: '0.5em', color: '#666' } }, 'No prepaid allocations configured.'),
+    results && results.length > 0 && React.createElement(
+      'div',
+      { className: 'table-container', style: { marginTop: '0.75em' } },
+      React.createElement(
+        'table',
+        { className: 'summary-table' },
+        React.createElement(
+          'thead',
+          null,
+          React.createElement(
+            'tr',
+            null,
+            React.createElement('th', null, 'Account'),
+            React.createElement('th', null, 'Used SU'),
+            React.createElement('th', null, 'Budget SU'),
+            React.createElement('th', null, 'Remaining SU'),
+            React.createElement('th', null, '% Used'),
+            React.createElement('th', null, 'Status')
+          )
+        ),
+        React.createElement(
+          'tbody',
+          null,
+          results.map(r =>
+            React.createElement(
+              'tr',
+              { key: r.account },
+              React.createElement('td', null, r.account),
+              React.createElement('td', null, r.used_su),
+              React.createElement('td', null, r.budget_su),
+              React.createElement('td', null, r.remaining_su),
+              React.createElement('td', null, r.percent_used + '%'),
+              React.createElement(
+                'td',
+                { style: { color: statusColor[r.status] || '#333', fontWeight: 'bold' } },
+                r.status
+              )
+            )
+          )
+        )
+      )
+    )
+  );
+}
+
 function AdminDashboard({ summary, details, daily, yearly, monthly, invoiceLedger = { invoices: [] }, prevSummary }) {
   const historical = yearly.length ? yearly : monthly;
   const historicalLabel = yearly.length
@@ -5089,6 +5179,8 @@ function AdminDashboard({ summary, details, daily, yearly, monthly, invoiceLedge
         )
       )
     ),
+
+    React.createElement(BalanceCheckerPanel, null),
 
     React.createElement(
       'div',

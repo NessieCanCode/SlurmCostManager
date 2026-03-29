@@ -98,6 +98,6 @@ jobs:
           files: |
             dist/**/*
             rpmbuild/RPMS/**/*.rpm
-            slurmcostmanager_*.deb
+            slurmledger_*.deb
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

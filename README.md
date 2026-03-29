@@ -184,6 +184,23 @@ Create custom rules via the admin UI — no config file editing required.
 └─────────────┘
 ```
 
+## Balance Enforcement
+
+For pre-paid allocations, `balance_enforcer.py` enforces budget limits via SLURM's native `GrpTRESMins` mechanism. Install the cron job to run it hourly:
+
+```
+# /etc/cron.d/slurmledger-enforcer
+0 * * * * root /usr/bin/python3 /usr/share/cockpit/slurmledger/balance_enforcer.py --enforce --log /var/log/slurmledger/enforcer.log
+```
+
+Run a dry-run check manually at any time:
+
+```bash
+python3 /usr/share/cockpit/slurmledger/balance_enforcer.py --check
+```
+
+The **Check Balances** button in the Admin Dashboard runs the same check interactively and displays results in the UI.
+
 ## Testing
 
 ```bash

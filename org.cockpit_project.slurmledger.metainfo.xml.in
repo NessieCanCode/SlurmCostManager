@@ -1,10 +1,10 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <component type="addon">
-  <id>org.cockpit_project.slurmcostmanager</id>
-  <name>Slurm Cost Manager</name>
-  <summary>Cockpit plugin for viewing Slurm billing information</summary>
+  <id>org.cockpit_project.slurmledger</id>
+  <name>SlurmLedger</name>
+  <summary>Cockpit plugin for viewing and managing Slurm billing and cost recovery</summary>
   <url type="homepage">https://github.com/NessieCanCode/SlurmCostManager</url>
   <metadata_license>MIT</metadata_license>
   <project_license>MIT</project_license>
-  <release version="1.0.0" date="2025-08-04"/>
+  <release version="@VERSION@" date="@DATE@"/>
 </component>

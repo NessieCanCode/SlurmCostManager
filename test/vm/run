@@ -11,5 +11,5 @@ if [ -z "$RUNTIME" ]; then
     fi
 fi
 
-$RUNTIME build -t slurmcostmanager-test -f test/vm/Dockerfile .
-$RUNTIME run --rm -v "$(pwd)":/src -w /src slurmcostmanager-test ./test/check-application
+$RUNTIME build -t slurmledger-test -f test/vm/Dockerfile .
+$RUNTIME run --rm -v "$(pwd)":/src -w /src slurmledger-test ./test/check-application
