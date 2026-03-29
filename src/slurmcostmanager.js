@@ -932,6 +932,7 @@ function Details({
     user: ''
   });
   const [error, setError] = useState(null);
+  const [isExporting, setIsExporting] = useState(false);
 
   function toggle(account) {
     setExpanded(prev => (prev === account ? null : account));
@@ -1027,6 +1028,22 @@ function Details({
   }
 
   async function exportInvoice() {
+    const requiredFields = ['institutionName', 'streetAddress', 'city', 'postalCode'];
+    const missing = requiredFields.filter(f => !institutionProfile[f]);
+    if (missing.length > 0) {
+      alert(`Institution profile incomplete. Please configure: ${missing.join(', ')}`);
+      return;
+    }
+
+    setIsExporting(true);
+    try {
+      await exportInvoiceImpl();
+    } finally {
+      setIsExporting(false);
+    }
+  }
+
+  async function exportInvoiceImpl() {
     const totals = filteredDetails.reduce(
       (acc, d) => {
         acc.core += d.core_hours || 0;
@@ -1152,6 +1169,7 @@ function Details({
       await saveInvoiceToLedger({ ...invoiceData, account: filters.account || '' }, invoiceData.total_due);
       // Trigger financial integration webhook for invoice.created
       if (HAS_COCKPIT) {
+        const webhookAt = new Date().toISOString();
         window.cockpit.spawn(
           [
             'python3', `${PLUGIN_BASE}/financial_export.py`,
@@ -1160,7 +1178,15 @@ function Details({
             '--format', 'webhook'
           ],
           { err: 'message' }
-        ).catch(e => console.warn('Webhook trigger failed:', e));
+        ).then(() => {
+          updateInvoiceLedger(invoiceData.invoice_number, { lastWebhookStatus: 'success', lastWebhookAt: webhookAt })
+            .catch(() => {});
+        }).catch(e => {
+          const statusMsg = `failed: ${e.message || String(e)}`;
+          updateInvoiceLedger(invoiceData.invoice_number, { lastWebhookStatus: statusMsg, lastWebhookAt: webhookAt })
+            .catch(() => {});
+          setError(`Invoice saved, but webhook failed: ${e.message || String(e)}`);
+        });
       }
     } catch (e) {
       console.error(e);
@@ -1211,7 +1237,11 @@ function Details({
         );
       }),
       React.createElement('button', { onClick: exportCSV }, 'Export CSV'),
-      React.createElement('button', { onClick: exportInvoice }, 'Export Invoice'),
+      React.createElement(
+        'button',
+        { onClick: exportInvoice, disabled: isExporting },
+        isExporting ? 'Exporting...' : 'Export Invoice'
+      ),
       error &&
         React.createElement(
           'span',
@@ -1409,9 +1439,21 @@ function InstitutionProfile() {
         errs[field] = `${label} is required`;
       }
     });
-    // state is a select so treat empty string as missing
     if (!profile.state || !String(profile.state).trim()) {
       errs.state = 'State/Province is required';
+    }
+    // Validate asterisked primary contact fields
+    if (!profile.primaryContact.fullName || !String(profile.primaryContact.fullName).trim()) {
+      errs['primaryContact.fullName'] = 'Primary contact name is required';
+    }
+    if (!profile.primaryContact.title || !String(profile.primaryContact.title).trim()) {
+      errs['primaryContact.title'] = 'Primary contact title is required';
+    }
+    if (!profile.primaryContact.email || !String(profile.primaryContact.email).trim()) {
+      errs['primaryContact.email'] = 'Primary contact email is required';
+    }
+    if (!profile.primaryContact.phone || !String(profile.primaryContact.phone).trim()) {
+      errs['primaryContact.phone'] = 'Primary contact phone is required';
     }
     if (Object.keys(errs).length) {
       setFieldErrors(errs);
@@ -1440,58 +1482,6 @@ function InstitutionProfile() {
     }
   }
 
-  const states = [
-    'Alabama',
-    'Alaska',
-    'Arizona',
-    'Arkansas',
-    'California',
-    'Colorado',
-    'Connecticut',
-    'Delaware',
-    'Florida',
-    'Georgia',
-    'Hawaii',
-    'Idaho',
-    'Illinois',
-    'Indiana',
-    'Iowa',
-    'Kansas',
-    'Kentucky',
-    'Louisiana',
-    'Maine',
-    'Maryland',
-    'Massachusetts',
-    'Michigan',
-    'Minnesota',
-    'Mississippi',
-    'Missouri',
-    'Montana',
-    'Nebraska',
-    'Nevada',
-    'New Hampshire',
-    'New Jersey',
-    'New Mexico',
-    'New York',
-    'North Carolina',
-    'North Dakota',
-    'Ohio',
-    'Oklahoma',
-    'Oregon',
-    'Pennsylvania',
-    'Rhode Island',
-    'South Carolina',
-    'South Dakota',
-    'Tennessee',
-    'Texas',
-    'Utah',
-    'Vermont',
-    'Virginia',
-    'Washington',
-    'West Virginia',
-    'Wisconsin',
-    'Wyoming'
-  ];
   const months = [
     'January',
     'February',
@@ -1623,9 +1613,12 @@ function InstitutionProfile() {
           React.createElement('input', {
             type: 'text',
             value: profile.primaryContact.fullName,
+            style: fieldErrors['primaryContact.fullName'] ? { borderColor: 'red' } : undefined,
             onChange: e => updatePrimary('fullName', e.target.value)
           })
-        )
+        ),
+        fieldErrors['primaryContact.fullName'] &&
+          React.createElement('span', { className: 'field-error' }, fieldErrors['primaryContact.fullName'])
       ),
       React.createElement(
         'div',
@@ -1639,9 +1632,12 @@ function InstitutionProfile() {
           React.createElement('input', {
             type: 'text',
             value: profile.primaryContact.title,
+            style: fieldErrors['primaryContact.title'] ? { borderColor: 'red' } : undefined,
             onChange: e => updatePrimary('title', e.target.value)
           })
-        )
+        ),
+        fieldErrors['primaryContact.title'] &&
+          React.createElement('span', { className: 'field-error' }, fieldErrors['primaryContact.title'])
       ),
       React.createElement(
         'div',
@@ -1655,9 +1651,12 @@ function InstitutionProfile() {
           React.createElement('input', {
             type: 'email',
             value: profile.primaryContact.email,
+            style: fieldErrors['primaryContact.email'] ? { borderColor: 'red' } : undefined,
             onChange: e => updatePrimary('email', e.target.value)
           })
-        )
+        ),
+        fieldErrors['primaryContact.email'] &&
+          React.createElement('span', { className: 'field-error' }, fieldErrors['primaryContact.email'])
       ),
       React.createElement(
         'div',
@@ -1671,9 +1670,12 @@ function InstitutionProfile() {
           React.createElement('input', {
             type: 'tel',
             value: profile.primaryContact.phone,
+            style: fieldErrors['primaryContact.phone'] ? { borderColor: 'red' } : undefined,
             onChange: e => updatePrimary('phone', e.target.value)
           })
-        )
+        ),
+        fieldErrors['primaryContact.phone'] &&
+          React.createElement('span', { className: 'field-error' }, fieldErrors['primaryContact.phone'])
       ),
       React.createElement('h4', null, 'Secondary Contact (Optional)'),
       React.createElement(
@@ -1769,16 +1771,13 @@ function InstitutionProfile() {
           'State/Province',
           React.createElement('span', { className: 'required' }, '*'),
           ': ',
-          React.createElement(
-            'select',
-            {
-              value: profile.state,
-              style: fieldErrors.state ? { borderColor: 'red' } : undefined,
-              onChange: e => update('state', e.target.value)
-            },
-            React.createElement('option', { value: '' }, 'Select...'),
-            states.map(s => React.createElement('option', { key: s, value: s }, s))
-          )
+          React.createElement('input', {
+            type: 'text',
+            placeholder: 'State / Province / Region',
+            value: profile.state,
+            style: fieldErrors.state ? { borderColor: 'red' } : undefined,
+            onChange: e => update('state', e.target.value)
+          })
         ),
         fieldErrors.state &&
           React.createElement('span', { className: 'field-error' }, fieldErrors.state)
@@ -3040,6 +3039,7 @@ function Rates({ onRatesUpdated, billingData }) {
   const [error, setError] = useState(null);
   const [saving, setSaving] = useState(false);
   const [status, setStatus] = useState(null);
+  const [ratesChangeLog, setRatesChangeLog] = useState([]);
   const [ratesTab, setRatesTab] = useState('rates'); // 'rates' | 'allocations' | 'billing-rules' | 'financial'
   const baseDir = PLUGIN_BASE;
 
@@ -3062,6 +3062,7 @@ function Rates({ onRatesUpdated, billingData }) {
           defaultRate: json.defaultRate ?? '',
           defaultGpuRate: json.defaultGpuRate ?? ''
         });
+        setRatesChangeLog(json.changeLog || []);
         const ovrs = json.overrides
           ? Object.entries(json.overrides).map(([account, cfg]) => ({
               account,
@@ -3207,6 +3208,32 @@ function Rates({ onRatesUpdated, billingData }) {
       } else {
         delete json.billing_rules;
       }
+
+      // Build a human-readable change summary for the audit log
+      const changeParts = [];
+      const prevRate = originalConfig && originalConfig.defaultRate != null ? originalConfig.defaultRate : null;
+      if (prevRate !== null && String(prevRate) !== String(defaultRate)) {
+        changeParts.push(`defaultRate: ${prevRate}\u2192${defaultRate}`);
+      }
+      const prevGpuRate = originalConfig && originalConfig.defaultGpuRate != null ? originalConfig.defaultGpuRate : null;
+      const newGpuRate = json.defaultGpuRate != null ? json.defaultGpuRate : null;
+      if (prevGpuRate !== newGpuRate && (prevGpuRate !== null || newGpuRate !== null)) {
+        changeParts.push(`defaultGpuRate: ${prevGpuRate}\u2192${newGpuRate}`);
+      }
+      const prevOverrideKeys = originalConfig && originalConfig.overrides ? Object.keys(originalConfig.overrides) : [];
+      const newOverrideKeys = json.overrides ? Object.keys(json.overrides) : [];
+      newOverrideKeys.filter(k => !prevOverrideKeys.includes(k)).forEach(k => changeParts.push(`${k} override added`));
+      prevOverrideKeys.filter(k => !newOverrideKeys.includes(k)).forEach(k => changeParts.push(`${k} override removed`));
+      const changeEntry = {
+        at: new Date().toISOString(),
+        by: (typeof window !== 'undefined' && window.cockpit && window.cockpit.user
+          ? (window._cockpitUsername || 'admin')
+          : 'admin'),
+        changes: changeParts.length ? changeParts.join(', ') : 'settings updated'
+      };
+      const updatedLog = [...ratesChangeLog, changeEntry].slice(-50);
+      json.changeLog = updatedLog;
+      setRatesChangeLog(updatedLog);
 
       const text = JSON.stringify(json, null, 2);
       if (window.cockpit && window.cockpit.file) {
@@ -3362,6 +3389,52 @@ function Rates({ onRatesUpdated, billingData }) {
       ),
       saving && React.createElement('span', null, ' Saving...'),
       status && React.createElement('span', { style: { marginLeft: '0.5em' } }, status)
+    ),
+    ratesChangeLog.length > 0 && React.createElement(
+      'div',
+      { style: { marginTop: '2em' } },
+      React.createElement('h3', { style: { marginBottom: '0.5em' } }, 'Change History'),
+      React.createElement(
+        'div',
+        {
+          style: {
+            border: '1px solid #e5e7eb',
+            borderRadius: '6px',
+            overflow: 'hidden',
+            maxHeight: '260px',
+            overflowY: 'auto'
+          }
+        },
+        React.createElement(
+          'table',
+          { className: 'details-table', style: { margin: 0 } },
+          React.createElement(
+            'thead',
+            null,
+            React.createElement(
+              'tr',
+              null,
+              React.createElement('th', null, 'Time'),
+              React.createElement('th', null, 'By'),
+              React.createElement('th', null, 'Changes')
+            )
+          ),
+          React.createElement(
+            'tbody',
+            null,
+            ratesChangeLog.slice().reverse().map((entry, i) =>
+              React.createElement(
+                'tr',
+                { key: i },
+                React.createElement('td', { style: { whiteSpace: 'nowrap', fontSize: '0.85em' } },
+                  entry.at ? new Date(entry.at).toLocaleString() : ''),
+                React.createElement('td', { style: { fontSize: '0.85em' } }, entry.by || ''),
+                React.createElement('td', { style: { fontSize: '0.85em' } }, entry.changes || '')
+              )
+            )
+          )
+        )
+      )
     )
   );
 
@@ -3678,7 +3751,7 @@ function RefundModal({ invoice, currentUser, onClose, onIssue }) {
   );
 }
 
-function Invoices({ currentUser }) {
+function Invoices({ currentUser, billingData, institutionProfile: instProfile }) {
   const [ledger, setLedger] = useState({ invoices: [] });
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
@@ -3687,6 +3760,8 @@ function Invoices({ currentUser }) {
   const [filterPeriod, setFilterPeriod] = useState('');
   const [refundTarget, setRefundTarget] = useState(null);
   const [exportError, setExportError] = useState(null);
+  const [batchProgress, setBatchProgress] = useState(null); // null | { done, total, message }
+  const [expandedAudit, setExpandedAudit] = useState(null); // invoice id or null
 
   useEffect(() => {
     setLoading(true);
@@ -3736,17 +3811,41 @@ function Invoices({ currentUser }) {
     await updateInvoice(inv.id, { status: 'cancelled' });
   }
 
-  function triggerWebhook(eventType, invoiceId) {
+  async function triggerWebhook(eventType, invoiceId) {
     if (!HAS_COCKPIT) return;
-    window.cockpit.spawn(
-      [
-        'python3', `${PLUGIN_BASE}/financial_export.py`,
-        '--event', eventType,
-        '--invoice-id', invoiceId,
-        '--format', 'webhook'
-      ],
-      { err: 'message' }
-    ).catch(e => console.warn('Webhook trigger failed:', e));
+    const webhookAt = new Date().toISOString();
+    try {
+      await window.cockpit.spawn(
+        [
+          'python3', `${PLUGIN_BASE}/financial_export.py`,
+          '--event', eventType,
+          '--invoice-id', invoiceId,
+          '--format', 'webhook'
+        ],
+        { err: 'message' }
+      );
+      const patch = { lastWebhookStatus: 'success', lastWebhookAt: webhookAt };
+      await updateInvoiceLedger(invoiceId, patch);
+      setLedger(prev => ({
+        ...prev,
+        invoices: (prev.invoices || []).map(inv =>
+          inv.id === invoiceId ? { ...inv, ...patch } : inv
+        )
+      }));
+    } catch (e) {
+      const statusMsg = `failed: ${e.message || String(e)}`;
+      const patch = { lastWebhookStatus: statusMsg, lastWebhookAt: webhookAt };
+      try {
+        await updateInvoiceLedger(invoiceId, patch);
+      } catch (_) {}
+      setLedger(prev => ({
+        ...prev,
+        invoices: (prev.invoices || []).map(inv =>
+          inv.id === invoiceId ? { ...inv, ...patch } : inv
+        )
+      }));
+      setError(`Webhook failed for ${invoiceId}: ${e.message || String(e)}`);
+    }
   }
 
   async function exportInvoiceFormat(inv, format) {
@@ -3863,6 +3962,158 @@ function Invoices({ currentUser }) {
     }
   }
 
+  async function generateAllInvoices() {
+    if (!billingData || !billingData.details || billingData.details.length === 0) {
+      setError('No billing data available for batch generation.');
+      return;
+    }
+    if (!instProfile) {
+      setError('Institution profile not loaded.');
+      return;
+    }
+    const requiredFields = ['institutionName', 'streetAddress', 'city', 'postalCode'];
+    const missing = requiredFields.filter(f => !instProfile[f]);
+    if (missing.length > 0) {
+      alert(`Institution profile incomplete. Please configure: ${missing.join(', ')}`);
+      return;
+    }
+    const details = billingData.details || [];
+    // Group by account
+    const byAccount = {};
+    details.forEach(d => {
+      if (!d.account) return;
+      if (!byAccount[d.account]) byAccount[d.account] = { core_hours: 0, gpu_hours: 0, cost: 0 };
+      byAccount[d.account].core_hours += d.core_hours || 0;
+      byAccount[d.account].gpu_hours += d.gpu_hours || 0;
+      byAccount[d.account].cost += d.cost || 0;
+    });
+    const accountList = Object.keys(byAccount);
+    if (accountList.length === 0) {
+      setError('No accounts found in billing data.');
+      return;
+    }
+
+    // Load rates
+    let ratesConfig = null;
+    try {
+      let ratesText;
+      if (window.cockpit && window.cockpit.file) {
+        ratesText = await window.cockpit.file(`${PLUGIN_BASE}/rates.json`).read();
+      } else {
+        const resp = await fetch('rates.json');
+        if (resp.ok) ratesText = await resp.text();
+      }
+      if (ratesText) ratesConfig = JSON.parse(ratesText);
+    } catch (_) {}
+
+    const currentLedger = await loadInvoiceLedger();
+    let generated = 0;
+    const total = accountList.length;
+    setBatchProgress({ done: 0, total, message: `Starting batch generation for ${total} accounts...` });
+
+    for (const account of accountList) {
+      const acct = byAccount[account];
+      let cpuRate = ratesConfig && ratesConfig.defaultRate != null ? ratesConfig.defaultRate : 0.01;
+      let gpuRate = ratesConfig && ratesConfig.defaultGpuRate != null ? ratesConfig.defaultGpuRate : 0.10;
+      if (ratesConfig && ratesConfig.overrides && ratesConfig.overrides[account]) {
+        const ovr = ratesConfig.overrides[account];
+        if (ovr.rate != null) cpuRate = ovr.rate;
+        if (ovr.gpuRate != null) gpuRate = ovr.gpuRate;
+      }
+      const items = [];
+      if (acct.core_hours > 0) items.push({ description: 'CPU Core-Hours', qty: acct.core_hours, rate: cpuRate, amount: acct.core_hours * cpuRate });
+      if (acct.gpu_hours > 0) items.push({ description: 'GPU Hours', qty: acct.gpu_hours, rate: gpuRate, amount: acct.gpu_hours * gpuRate });
+      if (items.length === 0) { generated++; continue; }
+
+      const invoiceNumber = (() => {
+        const year = new Date().getFullYear();
+        const prefix = `INV-${year}-`;
+        const existing = (currentLedger.invoices || [])
+          .filter(inv => inv.id && inv.id.startsWith(prefix))
+          .map(inv => parseInt(inv.id.replace(prefix, ''), 10))
+          .filter(n => !isNaN(n));
+        const next = existing.length > 0 ? Math.max(...existing) + 1 : 1;
+        const id = `${prefix}${String(next).padStart(4, '0')}`;
+        // push a placeholder so next iteration increments correctly
+        currentLedger.invoices = currentLedger.invoices || [];
+        currentLedger.invoices.push({ id });
+        return id;
+      })();
+
+      const paymentTermsDays = instProfile.paymentTermsDays || 30;
+      const dueDateMs = Date.now() + paymentTermsDays * 24 * 60 * 60 * 1000;
+      const invoiceData = {
+        invoice_number: invoiceNumber,
+        date_issued: new Date().toLocaleDateString('en-US', { year: 'numeric', month: 'long', day: 'numeric' }),
+        fiscal_year: new Date().getFullYear().toString(),
+        due_date: new Date(dueDateMs).toLocaleDateString('en-US', { year: 'numeric', month: 'long', day: 'numeric' }),
+        payment_terms: instProfile.paymentTerms || `Net ${paymentTermsDays}`,
+        period: billingData.period || '',
+        items,
+        subtotal: items.reduce((s, i) => s + i.amount, 0),
+        discount: 0,
+        tax: 0,
+        total_due: items.reduce((s, i) => s + i.amount, 0),
+        institution: {
+          name: instProfile.institutionName || '',
+          abbreviation: instProfile.institutionAbbreviation || '',
+          department: instProfile.departmentName || '',
+          address: instProfile.streetAddress || '',
+          city: instProfile.city || '',
+          state: instProfile.state || '',
+          postal: instProfile.postalCode || '',
+          country: instProfile.country || '',
+          contact: instProfile.primaryContact || {}
+        },
+        logo: instProfile.logo || '',
+        bank_info: instProfile.bankInfo && instProfile.bankInfo.trim()
+          ? instProfile.bankInfo.split('\n').map(l => l.trim()).filter(Boolean)
+          : [],
+        notes: instProfile.notes || '',
+        account
+      };
+
+      try {
+        if (HAS_COCKPIT) {
+          const output = await window.cockpit.spawn(
+            ['python3', `${PLUGIN_BASE}/invoice.py`],
+            { input: JSON.stringify(invoiceData), err: 'out' }
+          );
+          const trimmed = output.trim();
+          if (trimmed) {
+            try {
+              const byteChars = atob(trimmed);
+              const bytes = new Uint8Array(byteChars.length);
+              for (let i = 0; i < byteChars.length; i++) bytes[i] = byteChars.charCodeAt(i);
+              const blob = new Blob([bytes], { type: 'application/pdf' });
+              const url = URL.createObjectURL(blob);
+              const a = document.createElement('a');
+              a.href = url;
+              a.download = `invoice_${invoiceNumber}_${account}.pdf`;
+              document.body.appendChild(a);
+              a.click();
+              document.body.removeChild(a);
+              URL.revokeObjectURL(url);
+            } catch (_) {}
+          }
+        }
+        await saveInvoiceToLedger(invoiceData, invoiceData.total_due);
+        generated++;
+        setBatchProgress({ done: generated, total, message: `Generated ${generated} of ${total} invoices...` });
+      } catch (e) {
+        console.error(`Batch invoice failed for ${account}:`, e);
+        generated++;
+        setBatchProgress({ done: generated, total, message: `Generated ${generated} of ${total} invoices (some errors)...` });
+      }
+    }
+
+    // Reload ledger
+    const refreshed = await loadInvoiceLedger(setError);
+    setLedger(refreshed || { invoices: [] });
+    setBatchProgress({ done: total, total, message: `Done! Generated ${generated} of ${total} invoices.` });
+    setTimeout(() => setBatchProgress(null), 4000);
+  }
+
   const invoices = ledger.invoices || [];
   const allAccounts = [...new Set(invoices.map(inv => inv.account).filter(Boolean))];
   const allPeriods = [...new Set(invoices.map(inv => inv.period).filter(Boolean))].sort().reverse();
@@ -3879,7 +4130,38 @@ function Invoices({ currentUser }) {
   return React.createElement(
     'div',
     null,
-    React.createElement('h2', null, 'Invoices'),
+    React.createElement(
+      'div',
+      { style: { display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '0.5em' } },
+      React.createElement('h2', { style: { margin: 0 } }, 'Invoices'),
+      React.createElement(
+        'button',
+        {
+          onClick: generateAllInvoices,
+          disabled: !!batchProgress,
+          style: { marginLeft: '1em' }
+        },
+        batchProgress ? `${batchProgress.message}` : 'Generate All Invoices'
+      )
+    ),
+    batchProgress && React.createElement(
+      'div',
+      { style: { marginBottom: '0.75em' } },
+      React.createElement(
+        'div',
+        { style: { background: '#e5e7eb', borderRadius: '4px', height: '8px', width: '100%', marginBottom: '4px' } },
+        React.createElement('div', {
+          style: {
+            width: `${Math.round((batchProgress.done / batchProgress.total) * 100)}%`,
+            height: '100%',
+            borderRadius: '4px',
+            background: '#3b82f6',
+            transition: 'width 0.3s'
+          }
+        })
+      ),
+      React.createElement('span', { style: { fontSize: '0.85em', color: '#6b7280' } }, batchProgress.message)
+    ),
     error && React.createElement('p', { className: 'error' }, error),
 
     // Filters
@@ -3934,22 +4216,47 @@ function Invoices({ currentUser }) {
                 React.createElement('th', null, 'Amount'),
                 React.createElement('th', null, 'Status'),
                 React.createElement('th', null, 'Created'),
+                React.createElement('th', null, 'Webhook'),
                 React.createElement('th', null, 'Actions')
               )
             ),
             React.createElement(
               'tbody',
               null,
-              filtered.map(inv =>
-                React.createElement(
+              filtered.flatMap(inv => {
+                const auditOpen = expandedAudit === inv.id;
+                const mainRow = React.createElement(
                   'tr',
                   { key: inv.id },
-                  React.createElement('td', null, inv.id),
+                  React.createElement(
+                    'td',
+                    null,
+                    React.createElement(
+                      'button',
+                      {
+                        className: 'link-btn',
+                        onClick: () => setExpandedAudit(auditOpen ? null : inv.id),
+                        style: { marginRight: '4px', fontSize: '0.8em', color: '#6b7280' },
+                        title: 'View audit log'
+                      },
+                      auditOpen ? '\u25b2' : '\u25bc'
+                    ),
+                    inv.id
+                  ),
                   React.createElement('td', null, inv.account || ''),
                   React.createElement('td', null, inv.period || ''),
                   React.createElement('td', null, inv.amount != null ? `$${Number(inv.amount).toFixed(2)}` : ''),
                   React.createElement('td', null, React.createElement(StatusBadge, { status: inv.status })),
                   React.createElement('td', null, inv.created ? new Date(inv.created).toLocaleDateString() : ''),
+                  React.createElement(
+                    'td',
+                    null,
+                    inv.lastWebhookStatus
+                      ? (inv.lastWebhookStatus === 'success'
+                        ? React.createElement('span', { style: { color: '#16a34a', fontSize: '0.85em' }, title: `Last webhook: ${inv.lastWebhookAt || ''}` }, '\u2713 OK')
+                        : React.createElement('span', { style: { color: '#dc2626', fontSize: '0.85em' }, title: inv.lastWebhookStatus + (inv.lastWebhookAt ? ` at ${inv.lastWebhookAt}` : '') }, '\u26a0 Failed'))
+                      : React.createElement('span', { style: { color: '#9ca3af', fontSize: '0.85em' } }, '\u2014')
+                  ),
                   React.createElement(
                     'td',
                     { style: { whiteSpace: 'nowrap' } },
@@ -4035,8 +4342,56 @@ function Invoices({ currentUser }) {
                       )
                     )
                   )
-                )
-              )
+                );
+                const auditLog = inv.audit_log || [];
+                const auditRow = auditOpen
+                  ? React.createElement(
+                      'tr',
+                      { key: inv.id + '-audit' },
+                      React.createElement(
+                        'td',
+                        {
+                          colSpan: 8,
+                          style: { background: '#f9fafb', padding: '0.75em 1em' }
+                        },
+                        React.createElement('strong', { style: { fontSize: '0.85em' } }, 'Audit Log'),
+                        auditLog.length === 0
+                          ? React.createElement('p', { style: { margin: '0.25em 0 0', fontSize: '0.85em', color: '#6b7280' } }, 'No audit entries.')
+                          : React.createElement(
+                              'div',
+                              { style: { marginTop: '0.4em', display: 'flex', flexDirection: 'column', gap: '4px' } },
+                              auditLog.map((entry, i) =>
+                                React.createElement(
+                                  'div',
+                                  {
+                                    key: i,
+                                    style: {
+                                      display: 'flex',
+                                      gap: '0.75em',
+                                      alignItems: 'baseline',
+                                      fontSize: '0.82em',
+                                      borderLeft: '3px solid #3b82f6',
+                                      paddingLeft: '0.5em'
+                                    }
+                                  },
+                                  React.createElement('span', { style: { color: '#6b7280', whiteSpace: 'nowrap' } },
+                                    entry.at ? new Date(entry.at).toLocaleString() : ''),
+                                  React.createElement('span', { style: { fontWeight: 'bold' } }, entry.action || ''),
+                                  entry.from && entry.to
+                                    ? React.createElement('span', null, `${entry.from} \u2192 ${entry.to}`)
+                                    : null,
+                                  entry.amount != null
+                                    ? React.createElement('span', null, `$${Number(entry.amount).toFixed(2)}`)
+                                    : null,
+                                  React.createElement('span', { style: { color: '#6b7280' } }, `by ${entry.by || 'unknown'}`)
+                                )
+                              )
+                            )
+                      )
+                    )
+                  : null;
+                return [mainRow, auditRow].filter(Boolean);
+              })
             )
           )
         ),
@@ -4735,7 +5090,7 @@ function App() {
         monthOptions,
         institutionProfile
       }),
-    activeView === 'invoices' && React.createElement(Invoices, { currentUser: username }),
+    activeView === 'invoices' && React.createElement(Invoices, { currentUser: username, billingData: data, institutionProfile }),
     activeView === 'settings' && React.createElement(Rates, { onRatesUpdated: reload, billingData: data })
   );
 }

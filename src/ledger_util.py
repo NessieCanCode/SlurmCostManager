@@ -5,6 +5,7 @@ import json
 import os
 import shutil
 import sys
+from datetime import datetime
 
 LEDGER_PATH = '/etc/slurmledger/invoices.json'
 BACKUP_COUNT = 3
@@ -58,6 +59,13 @@ def update_invoice(invoice_id, patch):
                     print(json.dumps({"error": "InvalidTransition",
                         "message": f"Cannot change status from '{current}' to '{new_status}'"}))
                     sys.exit(1)
+                inv.setdefault('audit_log', []).append({
+                    'action': 'status_change',
+                    'from': current,
+                    'to': new_status,
+                    'by': os.environ.get('USER', 'unknown'),
+                    'at': datetime.utcnow().isoformat() + 'Z'
+                })
             inv.update(patch)
             break
     else:
@@ -80,6 +88,11 @@ if __name__ == '__main__':
         update_invoice(args.invoice_id, patch)
     elif args.action == 'add':
         invoice = json.load(sys.stdin)
+        invoice.setdefault('audit_log', []).append({
+            'action': 'created',
+            'by': os.environ.get('USER', 'unknown'),
+            'at': datetime.utcnow().isoformat() + 'Z'
+        })
         data = read_ledger()
         data['invoices'].append(invoice)
         write_ledger(data)
@@ -90,6 +103,13 @@ if __name__ == '__main__':
         for inv in data.get('invoices', []):
             if inv.get('id') == args.invoice_id:
                 inv.setdefault('refunds', []).append(refund)
+                inv.setdefault('audit_log', []).append({
+                    'action': 'refund_issued',
+                    'refund_id': refund.get('id', ''),
+                    'amount': refund.get('amount', 0),
+                    'by': os.environ.get('USER', 'unknown'),
+                    'at': datetime.utcnow().isoformat() + 'Z'
+                })
                 if refund.get('full'):
                     inv['status'] = 'refunded'
                 break
