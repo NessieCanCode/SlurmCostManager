@@ -136,23 +136,61 @@ Navigate to **Administration → Institution Profile**:
 3. Enter bank/payment details (for invoice footer)
 4. Set payment terms (e.g., "Net 30")
 
-## Step 10: Set Up Balance Enforcement (Optional)
+## Step 10: Set Up Balance Enforcement
 
-For pre-paid allocations, install the cron job:
+SlurmLedger uses a SLURM Lua job_submit plugin for real-time allocation enforcement.
+When a user submits a job that would exceed their account's budget, the job is
+rejected with a clear error message showing remaining balance.
+
+### Install the Lua Plugin
 
 ```bash
-# Create cron job for hourly balance checks
-sudo tee /etc/cron.d/slurmledger-enforcer << 'EOF'
-# SlurmLedger Balance Enforcer — check allocations hourly
-0 * * * * root /usr/bin/python3 /usr/share/cockpit/slurmledger/balance_enforcer.py --enforce --log /var/log/slurmledger/enforcer.log
-EOF
-sudo chmod 644 /etc/cron.d/slurmledger-enforcer
+# Copy the plugin
+sudo cp /usr/share/cockpit/slurmledger/job_submit.lua /etc/slurm/job_submit.lua
+sudo chmod 644 /etc/slurm/job_submit.lua
 
-# Test it first (dry run):
-sudo python3 /usr/share/cockpit/slurmledger/balance_enforcer.py --check
+# Enable in slurm.conf
+echo "JobSubmitPlugins=lua" >> /etc/slurm/slurm.conf
+
+# Apply configuration
+sudo scontrol reconfigure
 ```
 
-The enforcer uses SLURM's native `GrpTRESMins` limit to cap accounts at their allocation. Jobs submitted after the limit is reached will be held in PENDING state with reason `AssocGrpCPUMinutesLimit`.
+### What Users See
+
+When a job is rejected:
+```
+$ sbatch my_job.sh
+sbatch: error: SlurmLedger: Job rejected — account 'physics-lab' has exceeded its allocation.
+  Budget: 500000 SU | Used: 498200 SU | Remaining: 1800 SU
+  This job would require ~2400 SU.
+  Contact your PI or HPC admin to request additional allocation.
+```
+
+When approaching the limit (>80%), jobs are accepted but annotated:
+```
+$ squeue -j 12345 -o "%j %k"
+my_sim  [SlurmLedger] Account 'physics-lab' at 87% of allocation
+```
+
+### Enforcement Modes
+
+Edit `/etc/slurm/job_submit.lua`:
+- `ENABLE_ENFORCEMENT = true`  — reject jobs over budget (default)
+- `ENABLE_ENFORCEMENT = false` — audit-only mode (log but don't reject)
+
+### Companion Tools
+
+```bash
+# Check all account balances
+python3 /usr/share/cockpit/slurmledger/balance_enforcer.py --check
+
+# Reconcile SLURM limits with SlurmLedger allocations
+python3 /usr/share/cockpit/slurmledger/balance_enforcer.py --reconcile
+
+# Alternative: push limits via GrpTRESMins (instead of Lua)
+python3 /usr/share/cockpit/slurmledger/balance_enforcer.py --sync
+```
 
 ## Step 11: Configure Financial Integration (Optional)
 
@@ -215,7 +253,8 @@ sudo chmod 755 /etc/cron.daily/slurmledger-backup
 - [ ] Institution profile is complete
 - [ ] Test invoice generates with correct branding
 - [ ] Invoice numbers are sequential
-- [ ] Balance enforcer runs without errors (dry run)
+- [ ] Lua plugin installed at /etc/slurm/job_submit.lua and enabled in slurm.conf
+- [ ] Balance check runs without errors: `balance_enforcer.py --check`
 - [ ] Backup cron is active
 - [ ] File permissions are correct on /etc/slurmledger/
 
@@ -231,9 +270,16 @@ sudo chmod 755 /etc/cron.daily/slurmledger-backup
 - Upload a logo (PNG/JPG, under 256KB)
 - Fill in the bank/payment information
 
-### Balance enforcer says "No allocations configured"
+### Balance check says "No allocations configured"
 - Set up allocations in Administration → Allocations
-- Only "prepaid" allocations are enforced
+- Only "prepaid" allocations are enforced by the Lua plugin
+
+### Lua plugin not rejecting jobs
+- Verify `JobSubmitPlugins=lua` is in slurm.conf: `grep JobSubmitPlugins /etc/slurm/slurm.conf`
+- Verify the plugin file exists and is readable: `ls -la /etc/slurm/job_submit.lua`
+- Check slurmctld logs: `journalctl -u slurmctld | grep SlurmLedger`
+- Confirm `ENABLE_ENFORCEMENT = true` in `/etc/slurm/job_submit.lua`
+- Run `scontrol reconfigure` after any slurm.conf change
 
 ### Permission denied on config save
 - Check `/etc/slurmledger/` ownership: `ls -la /etc/slurmledger/`

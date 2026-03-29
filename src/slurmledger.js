@@ -5026,6 +5026,23 @@ function BalanceCheckerPanel() {
     'div',
     { style: { marginBottom: '1.5em' } },
     React.createElement('h3', null, 'Allocation Balance Check'),
+
+    // Enforcement mode notice
+    React.createElement(
+      'p',
+      { style: { margin: '0 0 0.75em 0', fontSize: '0.9em', color: '#555' } },
+      'Real-time enforcement via ',
+      React.createElement('code', null, 'job_submit.lua'),
+      ' — jobs are rejected at submission when the account budget is exceeded. ',
+      React.createElement(
+        'a',
+        { href: 'https://github.com/NessieCanCode/SlurmLedger/blob/main/PRODUCTION_SETUP.md#step-10-set-up-balance-enforcement',
+          target: '_blank', rel: 'noopener noreferrer' },
+        'Setup instructions'
+      ),
+      '.'
+    ),
+
     React.createElement(
       'button',
       { className: 'pf-c-button pf-m-secondary', onClick: runCheck, disabled: checking },
@@ -5047,8 +5064,8 @@ function BalanceCheckerPanel() {
             'tr',
             null,
             React.createElement('th', null, 'Account'),
-            React.createElement('th', null, 'Used SU'),
             React.createElement('th', null, 'Budget SU'),
+            React.createElement('th', null, 'Used SU'),
             React.createElement('th', null, 'Remaining SU'),
             React.createElement('th', null, '% Used'),
             React.createElement('th', null, 'Status')
@@ -5062,8 +5079,8 @@ function BalanceCheckerPanel() {
               'tr',
               { key: r.account },
               React.createElement('td', null, r.account),
-              React.createElement('td', null, r.used_su),
               React.createElement('td', null, r.budget_su),
+              React.createElement('td', null, r.used_su),
               React.createElement('td', null, r.remaining_su),
               React.createElement('td', null, r.percent_used + '%'),
               React.createElement(

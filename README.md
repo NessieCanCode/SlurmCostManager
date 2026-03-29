@@ -186,20 +186,64 @@ Create custom rules via the admin UI — no config file editing required.
 
 ## Balance Enforcement
 
-For pre-paid allocations, `balance_enforcer.py` enforces budget limits via SLURM's native `GrpTRESMins` mechanism. Install the cron job to run it hourly:
+SlurmLedger supports two approaches for enforcing prepaid allocation budgets:
+
+### Recommended: Lua job_submit plugin
+
+The `job_submit.lua` plugin is called by SLURM at job submission time (before the
+job is accepted). When a user submits a job that would exceed their account's budget,
+the job is rejected immediately with a clear, user-visible error message:
 
 ```
-# /etc/cron.d/slurmledger-enforcer
-0 * * * * root /usr/bin/python3 /usr/share/cockpit/slurmledger/balance_enforcer.py --enforce --log /var/log/slurmledger/enforcer.log
+$ sbatch my_job.sh
+sbatch: error: SlurmLedger: Job rejected — account 'physics-lab' has exceeded its allocation.
+  Budget: 500000 SU | Used: 498200 SU | Remaining: 1800 SU
+  This job would require ~2400 SU.
+  Contact your PI or HPC admin to request additional allocation.
 ```
 
-Run a dry-run check manually at any time:
+Install once per cluster — no cron job required:
 
 ```bash
-python3 /usr/share/cockpit/slurmledger/balance_enforcer.py --check
+sudo cp /usr/share/cockpit/slurmledger/job_submit.lua /etc/slurm/job_submit.lua
+echo "JobSubmitPlugins=lua" >> /etc/slurm/slurm.conf
+sudo scontrol reconfigure
 ```
 
-The **Check Balances** button in the Admin Dashboard runs the same check interactively and displays results in the UI.
+Set `ENABLE_ENFORCEMENT = false` in the plugin file to switch to audit-only mode
+(logs rejections without actually blocking jobs).
+
+### Alternative: GrpTRESMins via sacctmgr
+
+If your site cannot use Lua plugins, `balance_enforcer.py --sync` pushes allocation
+limits to SLURM as `GrpTRESMins` on each account. SLURM holds jobs that would exceed
+the limit with reason `AssocGrpCPUMinutesLimit`. This approach is less precise (the
+counter tracks lifetime CPU-minutes on the account, not allocation-period usage) and
+gives users a less informative error message.
+
+```bash
+python3 /usr/share/cockpit/slurmledger/balance_enforcer.py --sync
+```
+
+### Reporting: balance_enforcer.py --check
+
+`balance_enforcer.py --check` queries sacct to report current usage against each
+prepaid allocation. It works regardless of which enforcement approach is active and
+is the data source for the **Check Balances** button in the Admin Dashboard.
+
+```bash
+# Text report
+python3 /usr/share/cockpit/slurmledger/balance_enforcer.py --check
+
+# JSON output (consumed by Cockpit dashboard)
+python3 /usr/share/cockpit/slurmledger/balance_enforcer.py --check --json
+
+# Reconcile SLURM GrpTRESMins against SlurmLedger allocations
+python3 /usr/share/cockpit/slurmledger/balance_enforcer.py --reconcile
+```
+
+The **Check Balances** button in the Admin Dashboard runs `--check --json` and
+displays results in a table with per-account budget, usage, remaining SU, and status.
 
 ## Local Development & Testing
 

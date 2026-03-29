@@ -1,18 +1,27 @@
 #!/usr/bin/env python3
-"""SlurmLedger Balance Enforcer
+"""
+SlurmLedger Balance Tools
 
-Checks account allocations against usage and disables/enables
-SLURM accounts based on budget status.
+The primary enforcement mechanism is the Lua job_submit plugin
+(job_submit.lua) which checks allocations at job submission time.
+
+This script provides:
+  --check      Report allocation status for all accounts
+  --reconcile  Compare SLURM limits with SlurmLedger allocations
+  --sync       Push allocation limits to SLURM GrpTRESMins (alternative to Lua)
 
 Usage:
-  # Check all accounts and report (dry run):
+  # Check all accounts and report:
   python3 balance_enforcer.py --check
 
-  # Enforce limits (actually disable/enable accounts):
-  python3 balance_enforcer.py --enforce
+  # Check and emit JSON (used by Cockpit dashboard):
+  python3 balance_enforcer.py --check --json
 
-  # Run as cron (every hour):
-  # 0 * * * * /usr/bin/python3 /usr/share/cockpit/slurmledger/balance_enforcer.py --enforce --log /var/log/slurmledger/enforcer.log
+  # Reconcile SLURM GrpTRESMins with SlurmLedger allocations:
+  python3 balance_enforcer.py --reconcile
+
+  # Push allocation limits to SLURM via sacctmgr (alternative to Lua):
+  python3 balance_enforcer.py --sync
 """
 
 import argparse
@@ -62,22 +71,36 @@ def get_account_usage(account, start_date, end_date):
         return 0.0
 
 
-def get_account_status(account):
-    """Check if SLURM account is currently enabled."""
-    cmd = ['sacctmgr', 'show', 'account', account, 'format=Account,Description',
-           '--noheader', '--parsable2']
+def get_grptres_limit(account):
+    """Get the current GrpTRESMins cpu limit for a SLURM account.
+
+    Returns the limit in core-minutes, or None if no limit is set.
+    """
+    cmd = [
+        'sacctmgr', 'show', 'account', account,
+        'format=GrpTRESMins', '--noheader', '--parsable2'
+    ]
     try:
         result = subprocess.run(cmd, capture_output=True, text=True, timeout=15)
-        return 'active' if result.stdout.strip() else 'unknown'
+        line = result.stdout.strip()
+        if not line:
+            return None
+        # Format: "cpu=N,mem=..."
+        for part in line.split(','):
+            if part.startswith('cpu='):
+                val = part.split('=', 1)[1]
+                return int(val) if val.lstrip('-').isdigit() else None
+        return None
     except Exception:
-        return 'unknown'
+        return None
 
 
 def set_account_limit(account, max_su):
     """Set GrpTRESMins limit on a SLURM account to enforce budget.
 
-    This uses SLURM's native resource limit mechanism rather than
-    disabling accounts entirely, which is more graceful.
+    This uses SLURM's native resource limit mechanism. Jobs submitted after
+    the cumulative CPU-minutes are exhausted will be held in PENDING state
+    with reason AssocGrpCPUMinutesLimit.
     """
     # Convert SU (core-hours) to core-minutes for SLURM
     max_minutes = int(max_su * 60)
@@ -119,8 +142,8 @@ def remove_account_limit(account):
         return False
 
 
-def check_and_enforce(dry_run=True):
-    """Check all allocations and optionally enforce limits."""
+def check_allocations():
+    """Report allocation status for all prepaid accounts."""
     allocations = load_allocations()
     if not allocations:
         logging.info("No allocations configured")
@@ -131,7 +154,7 @@ def check_and_enforce(dry_run=True):
 
     for account, alloc in allocations.items():
         if alloc.get('type') != 'prepaid':
-            continue  # Only enforce prepaid allocations
+            continue
 
         budget_su = alloc.get('budget_su', 0)
         if not budget_su:
@@ -148,29 +171,25 @@ def check_and_enforce(dry_run=True):
 
         # Get current usage
         used_su = get_account_usage(account, start_date, now.strftime('%Y-%m-%d'))
-        remaining_su = budget_su - used_su
-        percent_used = (used_su / budget_su * 100) if budget_su > 0 else 0
 
         # Add carryover if configured
         carryover = alloc.get('carryover_su', 0)
         if carryover > 0:
             budget_su += carryover
-            remaining_su = budget_su - used_su
-            percent_used = (used_su / budget_su * 100) if budget_su > 0 else 0
 
-        status = 'ok'
-        action = 'none'
+        remaining_su = budget_su - used_su
+        percent_used = (used_su / budget_su * 100) if budget_su > 0 else 0
+
         alerts = alloc.get('alerts', [80, 90, 100])
 
         if percent_used >= 100:
             status = 'exceeded'
-            action = 'enforce_limit'
-        elif percent_used >= max(alerts) if alerts else 100:
+        elif alerts and percent_used >= max(alerts):
             status = 'critical'
-            action = 'warn'
-        elif percent_used >= min(alerts) if alerts else 80:
+        elif alerts and percent_used >= min(alerts):
             status = 'warning'
-            action = 'warn'
+        else:
+            status = 'ok'
 
         result = {
             'account': account,
@@ -179,32 +198,153 @@ def check_and_enforce(dry_run=True):
             'remaining_su': round(remaining_su, 2),
             'percent_used': round(percent_used, 1),
             'status': status,
-            'action': action,
         }
         results.append(result)
 
-        if dry_run:
-            logging.info(f"[DRY RUN] {account}: {percent_used:.1f}% used "
-                         f"({used_su:.0f}/{budget_su:.0f} SU) — {action}")
-        else:
-            if action == 'enforce_limit':
-                # Set the SLURM account limit to the budget
-                # SLURM will reject new jobs when the limit is reached
-                set_account_limit(account, budget_su)
-                logging.warning(f"ENFORCED: {account} at {percent_used:.1f}% — "
-                                f"GrpTRESMins set to {budget_su} SU")
-            elif status == 'ok' or remaining_su > budget_su * 0.05:
-                # Remove limit if well under budget (>5% remaining)
-                # This handles the case where budget was increased
-                pass  # Don't auto-remove limits — admin decision
+        logging.info(f"{account}: {percent_used:.1f}% used "
+                     f"({used_su:.0f}/{budget_su:.0f} SU) [{status}]")
+
+    return results
+
+
+def reconcile_allocations():
+    """Compare SLURM GrpTRESMins limits with SlurmLedger allocations.
+
+    Reports discrepancies between what SlurmLedger thinks the limits should
+    be and what SLURM actually has configured.
+    """
+    allocations = load_allocations()
+    if not allocations:
+        logging.info("No allocations configured")
+        return []
+
+    results = []
+    now = datetime.utcnow()
+
+    for account, alloc in allocations.items():
+        if alloc.get('type') != 'prepaid':
+            continue
+
+        budget_su = alloc.get('budget_su', 0)
+        carryover = alloc.get('carryover_su', 0)
+        total_budget_su = budget_su + carryover
+
+        expected_minutes = int(total_budget_su * 60) if total_budget_su > 0 else None
+        actual_minutes = get_grptres_limit(account)
+
+        match = True
+        note = 'in sync'
+
+        if expected_minutes is None and actual_minutes is not None:
+            match = False
+            note = f'unexpected SLURM limit: cpu={actual_minutes}min (no allocation configured)'
+        elif expected_minutes is not None and actual_minutes is None:
+            match = False
+            note = f'no SLURM limit set (expected cpu={expected_minutes}min)'
+        elif expected_minutes is not None and actual_minutes != expected_minutes:
+            match = False
+            note = f'mismatch: SLURM has cpu={actual_minutes}min, expected cpu={expected_minutes}min'
+
+        result = {
+            'account': account,
+            'budget_su': total_budget_su,
+            'expected_grptres_minutes': expected_minutes,
+            'actual_grptres_minutes': actual_minutes,
+            'match': match,
+            'note': note,
+        }
+        results.append(result)
+
+        icon = 'OK' if match else 'MISMATCH'
+        logging.info(f"[{icon}] {account}: {note}")
+
+    return results
+
+
+def sync_allocations():
+    """Push allocation limits to SLURM via sacctmgr.
+
+    This is an alternative to the Lua plugin: it sets GrpTRESMins on each
+    prepaid account so SLURM enforces the budget natively. Jobs that would
+    exceed the limit are held with reason AssocGrpCPUMinutesLimit.
+
+    Note: this approach is less precise than the Lua plugin because
+    GrpTRESMins counts total CPU-minutes consumed since the account was
+    last reset, not since the allocation start date.
+    """
+    allocations = load_allocations()
+    if not allocations:
+        logging.info("No allocations configured")
+        return []
+
+    results = []
+    now = datetime.utcnow()
+
+    for account, alloc in allocations.items():
+        if alloc.get('type') != 'prepaid':
+            continue
+
+        budget_su = alloc.get('budget_su', 0)
+        if not budget_su:
+            continue
+
+        start_date = alloc.get('start_date', now.strftime('%Y-01-01'))
+        end_date = alloc.get('end_date', now.strftime('%Y-12-31'))
+
+        # Only sync active allocations
+        try:
+            start_dt = datetime.strptime(start_date, '%Y-%m-%d')
+            end_dt = datetime.strptime(end_date, '%Y-%m-%d')
+        except ValueError:
+            logging.warning(f"Invalid dates for {account}, skipping")
+            continue
+
+        if now < start_dt or now > end_dt:
+            # Outside allocation window — remove limit
+            success = remove_account_limit(account)
+            results.append({'account': account, 'action': 'removed_limit', 'success': success})
+            continue
+
+        carryover = alloc.get('carryover_su', 0)
+        total_budget_su = budget_su + carryover
+
+        success = set_account_limit(account, total_budget_su)
+        results.append({
+            'account': account,
+            'action': 'set_limit',
+            'budget_su': total_budget_su,
+            'grptres_minutes': int(total_budget_su * 60),
+            'success': success,
+        })
+
+        status = 'OK' if success else 'FAILED'
+        logging.info(f"[{status}] {account}: GrpTRESMins=cpu={int(total_budget_su * 60)} "
+                     f"({total_budget_su:.0f} SU)")
 
     return results
 
 
 def main():
-    parser = argparse.ArgumentParser(description='SlurmLedger Balance Enforcer')
-    parser.add_argument('--check', action='store_true', help='Check allocations (dry run)')
-    parser.add_argument('--enforce', action='store_true', help='Enforce allocation limits')
+    parser = argparse.ArgumentParser(
+        description='SlurmLedger Balance Tools',
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog="""
+The primary enforcement mechanism is the Lua job_submit plugin (job_submit.lua).
+This script provides reporting and reconciliation support.
+
+Examples:
+  %(prog)s --check              # Report allocation status
+  %(prog)s --check --json       # JSON output (used by Cockpit dashboard)
+  %(prog)s --reconcile          # Compare SLURM limits with allocations
+  %(prog)s --sync               # Push allocation limits to SLURM GrpTRESMins
+        """
+    )
+    parser.add_argument('--check', action='store_true',
+                        help='Report allocation status for all accounts')
+    parser.add_argument('--reconcile', action='store_true',
+                        help='Compare SLURM GrpTRESMins limits with SlurmLedger allocations')
+    parser.add_argument('--sync', action='store_true',
+                        help='Push allocation limits to SLURM via sacctmgr (alternative to Lua)')
     parser.add_argument('--log', default=None, help='Log file path')
     parser.add_argument('--json', action='store_true', help='Output as JSON')
     args = parser.parse_args()
@@ -221,20 +361,36 @@ def main():
         ]
     )
 
-    if args.enforce:
-        results = check_and_enforce(dry_run=False)
-    elif args.check:
-        results = check_and_enforce(dry_run=True)
+    if args.check:
+        results = check_allocations()
+        if args.json:
+            print(json.dumps(results, indent=2))
+        else:
+            for r in results:
+                print(f"{r['account']:20s} {r['percent_used']:6.1f}% "
+                      f"({r['used_su']:.0f}/{r['budget_su']:.0f} SU) [{r['status']}]")
+
+    elif args.reconcile:
+        results = reconcile_allocations()
+        if args.json:
+            print(json.dumps(results, indent=2))
+        else:
+            for r in results:
+                icon = 'OK     ' if r['match'] else 'MISMATCH'
+                print(f"[{icon}] {r['account']:20s}  {r['note']}")
+
+    elif args.sync:
+        results = sync_allocations()
+        if args.json:
+            print(json.dumps(results, indent=2))
+        else:
+            for r in results:
+                status = 'OK' if r.get('success') else 'FAILED'
+                print(f"[{status}] {r['account']:20s}  {r['action']}")
+
     else:
         parser.print_help()
         sys.exit(1)
-
-    if args.json:
-        print(json.dumps(results, indent=2))
-    else:
-        for r in results:
-            print(f"{r['account']:20s} {r['percent_used']:6.1f}% "
-                  f"({r['used_su']:.0f}/{r['budget_su']:.0f} SU) [{r['status']}]")
 
 
 if __name__ == '__main__':
