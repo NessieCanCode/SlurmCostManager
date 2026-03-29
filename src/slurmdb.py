@@ -86,6 +86,169 @@ def _find_slurm_conf(service_paths=None):
     return "/etc/slurm/slurm.conf"
 
 
+# ---------------------------------------------------------------------------
+# Module-level billing computation helpers (no DB connection required)
+# ---------------------------------------------------------------------------
+
+def apply_billing_rules(
+    job: Dict[str, Any],
+    rules: List[Dict[str, Any]],
+) -> Dict[str, Any]:
+    """Evaluate billing rules against a single job dict.
+
+    Returns one of:
+      {"charge": True, "discount_percent": 0}
+      {"charge": False, "reason": "<rule name>"}
+      {"charge": True, "discount_percent": <n>, "reason": "<rule name>"}
+
+    This is a pure function — it does not require a database connection and
+    can be unit-tested independently of :class:`SlurmDB`.
+    """
+    _OPERATORS = {
+        "equals": lambda a, b: a == b,
+        "not_equals": lambda a, b: a != b,
+        "in": lambda a, b: a in b,
+        "not_in": lambda a, b: a not in b,
+        "less_than": lambda a, b: float(a) < float(b),
+        "greater_than": lambda a, b: float(a) > float(b),
+        "contains": lambda a, b: b in a,
+    }
+
+    for rule in rules:
+        if not rule.get("enabled", True):
+            continue
+
+        cond = rule.get("condition", {})
+        field = cond.get("field")
+        operator = cond.get("operator")
+        value = cond.get("value")
+        values = cond.get("values")
+
+        # Resolve the field value from the job dict.
+        # The "elapsed_seconds" virtual field is derived from the elapsed key.
+        if field == "elapsed_seconds":
+            job_val = job.get("elapsed") or 0
+        else:
+            job_val = job.get(field, "")
+
+        op_fn = _OPERATORS.get(operator)
+        if op_fn is None:
+            continue
+
+        try:
+            operand = values if operator in ("in", "not_in") else value
+            matched = op_fn(job_val, operand)
+        except (TypeError, ValueError):
+            matched = False
+
+        if not matched:
+            continue
+
+        # For no_charge rules with exclude_states: if the job's state is
+        # one of the excluded states, the rule does not apply.
+        exclude_states = rule.get("exclude_states", [])
+        if exclude_states and job.get("state") in exclude_states:
+            continue
+
+        action = rule.get("action")
+        rule_name = rule.get("name", rule.get("id", "unknown rule"))
+
+        if action == "no_charge":
+            return {"charge": False, "reason": rule_name}
+        elif action == "discount":
+            discount_percent = rule.get("discount_percent", 0)
+            return {
+                "charge": True,
+                "discount_percent": discount_percent,
+                "reason": rule_name,
+            }
+        elif action == "charge_requested_time":
+            # Signal to the caller that the job should be billed at
+            # requested time rather than actual elapsed time.  The job
+            # record may not carry tres_req wall-time; the caller handles
+            # the fallback.
+            return {
+                "charge": True,
+                "discount_percent": 0,
+                "use_requested_time": True,
+                "reason": rule_name,
+            }
+
+    # No rule matched — normal charge.
+    return {"charge": True, "discount_percent": 0}
+
+
+def build_time_series(
+    totals: Dict[str, Any],
+) -> Tuple[List[Dict[str, float]], List[Dict[str, float]], List[Dict[str, float]]]:
+    """Build daily, monthly, and yearly time-series lists from aggregated usage totals.
+
+    This is a pure function — it does not require a database connection and
+    can be unit-tested independently of :class:`SlurmDB`.
+    """
+    daily = [
+        {
+            'date': d,
+            'core_hours': round(totals['daily'].get(d, 0.0), 2),
+            'gpu_hours': round(totals.get('daily_gpu', {}).get(d, 0.0), 2),
+        }
+        for d in sorted(set(totals['daily']) | set(totals.get('daily_gpu', {})))
+    ]
+    monthly = [
+        {
+            'month': m,
+            'core_hours': round(totals['monthly'].get(m, 0.0), 2),
+            'gpu_hours': round(totals.get('monthly_gpu', {}).get(m, 0.0), 2),
+        }
+        for m in sorted(set(totals['monthly']) | set(totals.get('monthly_gpu', {})))
+    ]
+    yearly = [
+        {
+            'year': y,
+            'core_hours': round(totals['yearly'].get(y, 0.0), 2),
+            'gpu_hours': round(totals.get('yearly_gpu', {}).get(y, 0.0), 2),
+        }
+        for y in sorted(set(totals['yearly']) | set(totals.get('yearly_gpu', {})))
+    ]
+    return daily, monthly, yearly
+
+
+def calculate_projected_revenue(
+    start_dt: datetime,
+    end_dt: datetime,
+    cluster_cores: int,
+    rates_cfg: Dict[str, Any],
+) -> float:
+    """Calculate projected full-utilisation revenue for the given period.
+
+    Uses the per-month historical rates where available, falling back to
+    ``defaultRate``.  This is a pure function — it does not require a database
+    connection and can be unit-tested independently of :class:`SlurmDB`.
+    """
+    default_rate = rates_cfg.get('defaultRate', 0.01)
+    historical = rates_cfg.get('historicalRates', {})
+    start_date = start_dt.date()
+    end_date = end_dt.date()
+    current = date(start_date.year, start_date.month, 1)
+    end_marker = date(end_date.year, end_date.month, 1)
+    projected_revenue = 0.0
+    while current <= end_marker:
+        days_in_month = monthrange(current.year, current.month)[1]
+        month_start = date(current.year, current.month, 1)
+        month_end = date(current.year, current.month, days_in_month)
+        overlap_start = max(month_start, start_date)
+        overlap_end = min(month_end, end_date)
+        if overlap_start <= overlap_end:
+            days = (overlap_end - overlap_start).days + 1
+            rate = historical.get(current.strftime('%Y-%m'), default_rate)
+            projected_revenue += cluster_cores * 24 * days * rate
+        if current.month == 12:
+            current = date(current.year + 1, 1, 1)
+        else:
+            current = date(current.year, current.month + 1, 1)
+    return round(projected_revenue, 2)
+
+
 class SlurmDB:
     """Simple wrapper around the Slurm accounting database."""
 
@@ -850,83 +1013,9 @@ class SlurmDB:
     ) -> Dict[str, Any]:
         """Evaluate billing rules against a single job dict.
 
-        Returns one of:
-          {"charge": True, "discount_percent": 0}
-          {"charge": False, "reason": "<rule name>"}
-          {"charge": True, "discount_percent": <n>, "reason": "<rule name>"}
+        Delegates to the module-level :func:`apply_billing_rules` function.
         """
-        _OPERATORS = {
-            "equals": lambda a, b: a == b,
-            "not_equals": lambda a, b: a != b,
-            "in": lambda a, b: a in b,
-            "not_in": lambda a, b: a not in b,
-            "less_than": lambda a, b: float(a) < float(b),
-            "greater_than": lambda a, b: float(a) > float(b),
-            "contains": lambda a, b: b in a,
-        }
-
-        for rule in rules:
-            if not rule.get("enabled", True):
-                continue
-
-            cond = rule.get("condition", {})
-            field = cond.get("field")
-            operator = cond.get("operator")
-            value = cond.get("value")
-            values = cond.get("values")
-
-            # Resolve the field value from the job dict.
-            # The "elapsed_seconds" virtual field is derived from the elapsed key.
-            if field == "elapsed_seconds":
-                job_val = job.get("elapsed") or 0
-            else:
-                job_val = job.get(field, "")
-
-            op_fn = _OPERATORS.get(operator)
-            if op_fn is None:
-                continue
-
-            try:
-                operand = values if operator in ("in", "not_in") else value
-                matched = op_fn(job_val, operand)
-            except (TypeError, ValueError):
-                matched = False
-
-            if not matched:
-                continue
-
-            # For no_charge rules with exclude_states: if the job's state is
-            # one of the excluded states, the rule does not apply.
-            exclude_states = rule.get("exclude_states", [])
-            if exclude_states and job.get("state") in exclude_states:
-                continue
-
-            action = rule.get("action")
-            rule_name = rule.get("name", rule.get("id", "unknown rule"))
-
-            if action == "no_charge":
-                return {"charge": False, "reason": rule_name}
-            elif action == "discount":
-                discount_percent = rule.get("discount_percent", 0)
-                return {
-                    "charge": True,
-                    "discount_percent": discount_percent,
-                    "reason": rule_name,
-                }
-            elif action == "charge_requested_time":
-                # Signal to the caller that the job should be billed at
-                # requested time rather than actual elapsed time.  The job
-                # record may not carry tres_req wall-time; the caller handles
-                # the fallback.
-                return {
-                    "charge": True,
-                    "discount_percent": 0,
-                    "use_requested_time": True,
-                    "reason": rule_name,
-                }
-
-        # No rule matched — normal charge.
-        return {"charge": True, "discount_percent": 0}
+        return apply_billing_rules(job, rules)
 
     def _build_account_details(
         self,
@@ -1076,31 +1165,11 @@ class SlurmDB:
     def _build_time_series(
         self, totals: Dict[str, Any]
     ) -> Tuple[List[Dict[str, float]], List[Dict[str, float]], List[Dict[str, float]]]:
-        daily = [
-            {
-                'date': d,
-                'core_hours': round(totals['daily'].get(d, 0.0), 2),
-                'gpu_hours': round(totals.get('daily_gpu', {}).get(d, 0.0), 2),
-            }
-            for d in sorted(set(totals['daily']) | set(totals.get('daily_gpu', {})))
-        ]
-        monthly = [
-            {
-                'month': m,
-                'core_hours': round(totals['monthly'].get(m, 0.0), 2),
-                'gpu_hours': round(totals.get('monthly_gpu', {}).get(m, 0.0), 2),
-            }
-            for m in sorted(set(totals['monthly']) | set(totals.get('monthly_gpu', {})))
-        ]
-        yearly = [
-            {
-                'year': y,
-                'core_hours': round(totals['yearly'].get(y, 0.0), 2),
-                'gpu_hours': round(totals.get('yearly_gpu', {}).get(y, 0.0), 2),
-            }
-            for y in sorted(set(totals['yearly']) | set(totals.get('yearly_gpu', {})))
-        ]
-        return daily, monthly, yearly
+        """Build time-series lists from aggregated usage totals.
+
+        Delegates to the module-level :func:`build_time_series` function.
+        """
+        return build_time_series(totals)
 
     def _calculate_projected_revenue(
         self,
@@ -1109,28 +1178,11 @@ class SlurmDB:
         cluster_cores: int,
         rates_cfg: Dict[str, Any],
     ) -> float:
-        default_rate = rates_cfg.get('defaultRate', 0.01)
-        historical = rates_cfg.get('historicalRates', {})
-        start_date = start_dt.date()
-        end_date = end_dt.date()
-        current = date(start_date.year, start_date.month, 1)
-        end_marker = date(end_date.year, end_date.month, 1)
-        projected_revenue = 0.0
-        while current <= end_marker:
-            days_in_month = monthrange(current.year, current.month)[1]
-            month_start = date(current.year, current.month, 1)
-            month_end = date(current.year, current.month, days_in_month)
-            overlap_start = max(month_start, start_date)
-            overlap_end = min(month_end, end_date)
-            if overlap_start <= overlap_end:
-                days = (overlap_end - overlap_start).days + 1
-                rate = historical.get(current.strftime('%Y-%m'), default_rate)
-                projected_revenue += cluster_cores * 24 * days * rate
-            if current.month == 12:
-                current = date(current.year + 1, 1, 1)
-            else:
-                current = date(current.year, current.month + 1, 1)
-        return round(projected_revenue, 2)
+        """Calculate projected revenue for the period.
+
+        Delegates to the module-level :func:`calculate_projected_revenue` function.
+        """
+        return calculate_projected_revenue(start_dt, end_dt, cluster_cores, rates_cfg)
 
     def export_summary(
         self,

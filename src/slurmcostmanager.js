@@ -888,7 +888,11 @@ function UserDetails({ users }) {
             {
               key: u.user,
               className: 'clickable',
-              onClick: () => toggle(u.user)
+              onClick: () => toggle(u.user),
+              tabIndex: 0,
+              role: 'button',
+              'aria-expanded': expanded === u.user,
+              onKeyDown: (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); toggle(u.user); } }
             },
             React.createElement('td', null, u.user),
             React.createElement('td', null, u.core_hours),
@@ -1276,7 +1280,11 @@ function Details({
                 {
                   key: d.account,
                   className: 'clickable',
-                  onClick: () => toggle(d.account)
+                  onClick: () => toggle(d.account),
+                  tabIndex: 0,
+                  role: 'button',
+                  'aria-expanded': expanded === d.account,
+                  onKeyDown: (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); toggle(d.account); } }
                 },
                 React.createElement('td', null, d.account),
                 React.createElement('td', null, d.core_hours),
@@ -2027,6 +2035,8 @@ function AllocationModal({ allocation, accountName, onSave, onClose }) {
     ((allocation && allocation.alerts) || [80, 90, 100]).join(', ')
   );
   const [error, setError] = useState(null);
+  const firstInputRef = React.useRef(null);
+  useEffect(() => { firstInputRef.current?.focus(); }, []);
 
   function update(field, value) {
     setForm(prev => ({ ...prev, [field]: value }));
@@ -2058,7 +2068,7 @@ function AllocationModal({ allocation, accountName, onSave, onClose }) {
 
   return React.createElement(
     'div',
-    { className: 'modal-overlay', onClick: onClose },
+    { className: 'modal-overlay', onClick: onClose, onKeyDown: (e) => { if (e.key === 'Escape') onClose(); } },
     React.createElement(
       'div',
       {
@@ -2074,7 +2084,7 @@ function AllocationModal({ allocation, accountName, onSave, onClose }) {
         React.createElement('label', null, 'Type: '),
         React.createElement(
           'select',
-          { value: form.type, onChange: e => update('type', e.target.value) },
+          { ref: firstInputRef, value: form.type, onChange: e => update('type', e.target.value) },
           React.createElement('option', { value: 'prepaid' }, 'Prepaid'),
           React.createElement('option', { value: 'postpaid' }, 'Postpaid')
         )
@@ -2193,7 +2203,7 @@ function AllocationsTab({ allocations, onAllocationsChange, accounts }) {
     React.createElement('h3', null, 'Account Allocations'),
     React.createElement(
       'p',
-      { style: { color: '#6b7280', fontSize: '0.9em' } },
+      { style: { color: '#4b5563', fontSize: '0.9em' } },
       'Set budget Service Unit (SU) limits and alert thresholds per account. 1 SU = 1 core-hour.'
     ),
     React.createElement(
@@ -2448,7 +2458,7 @@ function FinancialIntegrationTab() {
     React.createElement('h2', null, 'Financial Integration'),
     React.createElement(
       'p',
-      { style: { color: '#6b7280', fontSize: '0.9em' } },
+      { style: { color: '#4b5563', fontSize: '0.9em' } },
       'Connect SlurmLedger to your institution\'s financial system to export Journal Entries and trigger invoice event webhooks.'
     ),
     // Enable toggle
@@ -2515,7 +2525,7 @@ function FinancialIntegrationTab() {
     React.createElement('h3', null, 'Chart of Accounts Mapping'),
     React.createElement(
       'p',
-      { style: { color: '#6b7280', fontSize: '0.9em' } },
+      { style: { color: '#4b5563', fontSize: '0.9em' } },
       'Map SLURM account names to your institution\'s chart string. A "default" entry applies to all unmapped accounts.'
     ),
     React.createElement(
@@ -2650,6 +2660,8 @@ function BillingRuleModal({ rule, onSave, onClose }) {
     description: rule.description || ''
   });
   const [error, setError] = useState(null);
+  const firstInputRef = React.useRef(null);
+  useEffect(() => { firstInputRef.current?.focus(); }, []);
 
   function updateCond(field, value) {
     setForm(prev => ({ ...prev, condition: { ...prev.condition, [field]: value } }));
@@ -2703,7 +2715,7 @@ function BillingRuleModal({ rule, onSave, onClose }) {
 
   return React.createElement(
     'div',
-    { className: 'modal-overlay', onClick: onClose },
+    { className: 'modal-overlay', onClick: onClose, onKeyDown: (e) => { if (e.key === 'Escape') onClose(); } },
     React.createElement(
       'div',
       { className: 'modal', onClick: e => e.stopPropagation(), style: { maxWidth: '560px', width: '95%' } },
@@ -2712,7 +2724,7 @@ function BillingRuleModal({ rule, onSave, onClose }) {
       React.createElement('div', { style: { marginBottom: '0.75em' } },
         React.createElement('label', null, 'Rule ID: '),
         React.createElement('input', {
-          type: 'text', value: form.id, disabled: !isNew,
+          ref: firstInputRef, type: 'text', value: form.id, disabled: !isNew,
           onChange: e => setForm(prev => ({ ...prev, id: e.target.value })),
           placeholder: 'e.g. no-charge-weekend', style: { width: '100%', marginTop: '4px' }
         })
@@ -2892,7 +2904,7 @@ function BillingRulesTab({ rules, onRulesChange, billingData }) {
     React.createElement('h3', null, 'Billing Rules'),
     React.createElement(
       'p',
-      { style: { color: '#6b7280', fontSize: '0.9em' } },
+      { style: { color: '#4b5563', fontSize: '0.9em' } },
       'Rules are evaluated in order — first matching rule wins. Disabled rules are skipped.'
     ),
     React.createElement(
@@ -2970,7 +2982,7 @@ function BillingRulesTab({ rules, onRulesChange, billingData }) {
                   React.createElement('td', null, React.createElement('strong', null, rule.name)),
                   React.createElement('td', { style: { fontFamily: 'monospace', fontSize: '0.85em' } }, conditionSummary(rule)),
                   React.createElement('td', null, actionLabel(rule)),
-                  React.createElement('td', { style: { color: '#6b7280', fontSize: '0.85em' } }, rule.description || ''),
+                  React.createElement('td', { style: { color: '#4b5563', fontSize: '0.85em' } }, rule.description || ''),
                   React.createElement(
                     'td',
                     { style: { fontSize: '0.85em' } },
@@ -3668,6 +3680,8 @@ function RefundModal({ invoice, currentUser, onClose, onIssue }) {
   const [reason, setReason] = useState('');
   const [partial, setPartial] = useState(false);
   const [error, setError] = useState(null);
+  const firstInputRef = React.useRef(null);
+  useEffect(() => { firstInputRef.current?.focus(); }, []);
 
   function handleSubmit() {
     const amt = parseFloat(amount);
@@ -3688,7 +3702,7 @@ function RefundModal({ invoice, currentUser, onClose, onIssue }) {
 
   return React.createElement(
     'div',
-    { className: 'modal-overlay', onClick: onClose },
+    { className: 'modal-overlay', onClick: onClose, onKeyDown: (e) => { if (e.key === 'Escape') onClose(); } },
     React.createElement(
       'div',
       {
@@ -3702,6 +3716,7 @@ function RefundModal({ invoice, currentUser, onClose, onIssue }) {
         { style: { marginBottom: '0.75em' } },
         React.createElement('label', null, 'Refund Amount ($): '),
         React.createElement('input', {
+          ref: firstInputRef,
           type: 'number',
           step: '0.01',
           value: amount,
@@ -4160,7 +4175,7 @@ function Invoices({ currentUser, billingData, institutionProfile: instProfile })
           }
         })
       ),
-      React.createElement('span', { style: { fontSize: '0.85em', color: '#6b7280' } }, batchProgress.message)
+      React.createElement('span', { style: { fontSize: '0.85em', color: '#4b5563' } }, batchProgress.message)
     ),
     error && React.createElement('p', { className: 'error' }, error),
 
@@ -4227,7 +4242,13 @@ function Invoices({ currentUser, billingData, institutionProfile: instProfile })
                 const auditOpen = expandedAudit === inv.id;
                 const mainRow = React.createElement(
                   'tr',
-                  { key: inv.id },
+                  {
+                    key: inv.id,
+                    tabIndex: 0,
+                    role: 'button',
+                    'aria-expanded': auditOpen,
+                    onKeyDown: (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); setExpandedAudit(auditOpen ? null : inv.id); } }
+                  },
                   React.createElement(
                     'td',
                     null,
@@ -4236,7 +4257,7 @@ function Invoices({ currentUser, billingData, institutionProfile: instProfile })
                       {
                         className: 'link-btn',
                         onClick: () => setExpandedAudit(auditOpen ? null : inv.id),
-                        style: { marginRight: '4px', fontSize: '0.8em', color: '#6b7280' },
+                        style: { marginRight: '4px', fontSize: '0.8em', color: '#4b5563' },
                         title: 'View audit log'
                       },
                       auditOpen ? '\u25b2' : '\u25bc'
@@ -4356,7 +4377,7 @@ function Invoices({ currentUser, billingData, institutionProfile: instProfile })
                         },
                         React.createElement('strong', { style: { fontSize: '0.85em' } }, 'Audit Log'),
                         auditLog.length === 0
-                          ? React.createElement('p', { style: { margin: '0.25em 0 0', fontSize: '0.85em', color: '#6b7280' } }, 'No audit entries.')
+                          ? React.createElement('p', { style: { margin: '0.25em 0 0', fontSize: '0.85em', color: '#4b5563' } }, 'No audit entries.')
                           : React.createElement(
                               'div',
                               { style: { marginTop: '0.4em', display: 'flex', flexDirection: 'column', gap: '4px' } },
@@ -4374,7 +4395,7 @@ function Invoices({ currentUser, billingData, institutionProfile: instProfile })
                                       paddingLeft: '0.5em'
                                     }
                                   },
-                                  React.createElement('span', { style: { color: '#6b7280', whiteSpace: 'nowrap' } },
+                                  React.createElement('span', { style: { color: '#4b5563', whiteSpace: 'nowrap' } },
                                     entry.at ? new Date(entry.at).toLocaleString() : ''),
                                   React.createElement('span', { style: { fontWeight: 'bold' } }, entry.action || ''),
                                   entry.from && entry.to
@@ -4383,7 +4404,7 @@ function Invoices({ currentUser, billingData, institutionProfile: instProfile })
                                   entry.amount != null
                                     ? React.createElement('span', null, `$${Number(entry.amount).toFixed(2)}`)
                                     : null,
-                                  React.createElement('span', { style: { color: '#6b7280' } }, `by ${entry.by || 'unknown'}`)
+                                  React.createElement('span', { style: { color: '#4b5563' } }, `by ${entry.by || 'unknown'}`)
                                 )
                               )
                             )
@@ -4947,7 +4968,7 @@ function App() {
     return React.createElement(
       'div',
       { className: 'app', style: { display: 'flex', alignItems: 'center', justifyContent: 'center', minHeight: '200px' } },
-      React.createElement('p', { style: { color: '#6b7280' } }, 'Loading...')
+      React.createElement('p', { style: { color: '#4b5563' } }, 'Loading...')
     );
   }
 
@@ -4974,7 +4995,7 @@ function App() {
         {
           style: {
             fontSize: '0.85em',
-            color: '#6b7280',
+            color: '#4b5563',
             backgroundColor: '#f3f4f6',
             padding: '3px 10px',
             borderRadius: '12px'
