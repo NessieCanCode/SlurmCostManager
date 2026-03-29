@@ -203,6 +203,36 @@ npx eslint src/ test/
 
 See [CONTRIBUTING.md](CONTRIBUTING.md).
 
+## Security Model
+
+SlurmLedger delegates authentication entirely to Cockpit. Users log in through the Cockpit web interface; the plugin receives the authenticated session and never manages passwords or session tokens itself.
+
+**Role enforcement is UI-level only.** The role system (admin, finance, PI, member) controls which tabs and actions are visible in the browser. The backend Python scripts (`slurmdb.py`, `invoice.py`, `financial_export.py`) run with the OS permissions of the authenticated Cockpit user — they do not enforce roles independently. On most deployments the plugin is used by HPC administrators, so this is acceptable. If you need hard backend enforcement, wrap the scripts with sudo rules.
+
+**API keys and webhook secrets** should be stored in `/etc/slurmledger/financial_config.json` with restricted permissions:
+
+```bash
+sudo chown root:cockpit-ws /etc/slurmledger/financial_config.json
+sudo chmod 0640 /etc/slurmledger/financial_config.json
+```
+
+This file is separate from `institution.json` (which holds non-sensitive configuration) so that access controls can be applied without restricting the rest of the profile.
+
+**SQL injection prevention.** All queries in `slurmdb.py` use parameterized statements (`%s` placeholders with PyMySQL). Identifier values (host, user, database, cluster) are validated against a strict allowlist regex (`^[A-Za-z0-9_]+$`) before use. Date parameters are validated as YYYY-MM-DD before conversion to UNIX timestamps.
+
+**Billing rules engine.** The rules engine in `slurmdb.py` evaluates conditions using a closed set of comparison operators (`=`, `!=`, `<`, `>`, `contains`). User-supplied rule data is never passed to `eval()` or `exec()`. Adding a billing rule through the UI cannot execute arbitrary code.
+
+**Invoice ledger integrity.** The ledger (`/etc/slurmledger/invoices.json`) is written atomically via `ledger_util.py`: a temp file is written with an exclusive `flock`, then renamed into place. Rolling backups (`.bak`, `.bak.1`, `.bak.2`) are maintained automatically. If the ledger is corrupted, the UI displays an error pointing to the backup files.
+
+**Recommended file permissions summary:**
+
+| File | Owner | Mode | Notes |
+|---|---|---|---|
+| `/etc/slurmledger/institution.json` | root | 0644 | Non-sensitive institution profile |
+| `/etc/slurmledger/financial_config.json` | root:cockpit-ws | 0640 | API keys, webhook URL |
+| `/etc/slurmledger/invoices.json` | root:cockpit-ws | 0640 | Invoice ledger |
+| `/etc/slurmledger/rates.json` | root | 0644 | Billing rates |
+
 ## License
 
 LGPL-2.1 — See [LICENSE](LICENSE).

@@ -727,12 +727,19 @@ class SlurmDB:
         account: str,
         used_su: float,
         rates_cfg: Dict[str, Any],
+        account_usage_by_month: Optional[Dict[str, Any]] = None,
     ) -> Dict[str, Any]:
         """Return allocation tracking fields for *account*.
 
         Returns a dict with keys: budget_su, used_su, remaining_su,
         percent_used, alert_level.  When no allocation is configured for the
         account the budget_su fields are None.
+
+        When *account_usage_by_month* is provided (a dict mapping YYYY-MM to
+        account-level usage dicts with a 'core_hours' key) and the allocation
+        has start_date/end_date set, used_su is re-computed to only include
+        months that fall within the allocation's date boundaries.  This prevents
+        the query period from inflating or deflating the allocation balance.
         """
         allocations = rates_cfg.get("allocations", {})
         alloc = allocations.get(account)
@@ -754,6 +761,33 @@ class SlurmDB:
                 "percent_used": None,
                 "alert_level": None,
             }
+
+        # If the allocation has explicit date bounds and per-month usage is
+        # available, filter used_su to only count months within the allocation
+        # period so that wide query windows do not misrepresent the balance.
+        alloc_start_str = alloc.get("start_date")
+        alloc_end_str = alloc.get("end_date")
+        if account_usage_by_month and (alloc_start_str or alloc_end_str):
+            try:
+                alloc_start = _fromisoformat(alloc_start_str).date() if alloc_start_str else None
+                alloc_end = _fromisoformat(alloc_end_str).date() if alloc_end_str else None
+                scoped_su = 0.0
+                for month_key, month_accounts in account_usage_by_month.items():
+                    # month_key is YYYY-MM; compare its first day against bounds
+                    try:
+                        month_date = _fromisoformat(month_key + "-01").date()
+                    except ValueError:
+                        continue
+                    if alloc_start and month_date < date(alloc_start.year, alloc_start.month, 1):
+                        continue
+                    if alloc_end and month_date > date(alloc_end.year, alloc_end.month, 1):
+                        continue
+                    acct_vals = month_accounts.get(account)
+                    if acct_vals:
+                        scoped_su += acct_vals.get("core_hours", 0.0)
+                used_su = scoped_su
+            except (ValueError, TypeError, AttributeError):
+                pass  # fall back to the passed-in used_su
 
         remaining = budget - used_su
         percent = round(used_su / budget * 100, 1) if budget > 0 else 0.0
@@ -777,8 +811,8 @@ class SlurmDB:
             "alert_level": alert_level,
             "alloc_type": alloc.get("type"),
             "alloc_period": alloc.get("period"),
-            "start_date": alloc.get("start_date"),
-            "end_date": alloc.get("end_date"),
+            "start_date": alloc_start_str,
+            "end_date": alloc_end_str,
             "carryover": alloc.get("carryover"),
         }
 
@@ -1021,7 +1055,8 @@ class SlurmDB:
                     if 0 < discount < 1:
                         acct_cost *= 1 - discount
                 alloc_info = self._compute_allocation_info(
-                    account, vals['core_hours'], rates_cfg
+                    account, vals['core_hours'], rates_cfg,
+                    account_usage_by_month=usage,
                 )
                 details.append(
                     {

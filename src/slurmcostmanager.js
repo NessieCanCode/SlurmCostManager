@@ -62,7 +62,7 @@ function useBillingData(period) {
   const load = useCallback(async () => {
     if (abortRef.current) {
       if (abortRef.current.abort) abortRef.current.abort();
-      if (abortRef.current.close) abortRef.current.close();
+      if (abortRef.current.close) abortRef.current.close('cancelled');
     }
     setLoading(true);
     setError(null);
@@ -116,14 +116,68 @@ function useBillingData(period) {
   }, [period]);
 
   useEffect(() => {
-    load();
-    return () => {
+    let currentProc = null;
+    const run = async () => {
       if (abortRef.current) {
         if (abortRef.current.abort) abortRef.current.abort();
         if (abortRef.current.close) abortRef.current.close();
       }
+      setLoading(true);
+      setError(null);
+      try {
+        let json;
+        if (HAS_COCKPIT) {
+          let start, end;
+          if (typeof period === 'string') {
+            ({ start, end } = getBillingPeriod(period));
+          } else if (period && period.start && period.end) {
+            ({ start, end } = period);
+          } else {
+            ({ start, end } = getBillingPeriod());
+          }
+          const args = [
+            'python3',
+            `${PLUGIN_BASE}/slurmdb.py`,
+            '--start',
+            start,
+            '--end',
+            end,
+            '--output',
+            '-',
+          ];
+          currentProc = window.cockpit.spawn(args, { err: 'message' });
+          abortRef.current = currentProc;
+          const output = await currentProc;
+          json = JSON.parse(output);
+          if (json && json.error && json.message && !json.summary) {
+            throw new Error(`${json.error}: ${json.message}`);
+          }
+        } else {
+          const controller = new AbortController();
+          currentProc = controller;
+          abortRef.current = controller;
+          const resp = await fetch('billing.json', { signal: controller.signal });
+          if (!resp.ok) throw new Error('Failed to fetch billing data');
+          json = await resp.json();
+        }
+        setData(json);
+      } catch (e) {
+        if (e.name !== 'AbortError') {
+          console.error(e);
+          setError(e.message || String(e));
+        }
+      } finally {
+        setLoading(false);
+      }
     };
-  }, [load]);
+    run();
+    return () => {
+      if (currentProc) {
+        if (currentProc.abort) currentProc.abort();
+        if (currentProc.close) currentProc.close('cancelled');
+      }
+    };
+  }, [period]);
 
   return { data, error, loading, reload: load };
 }
@@ -2258,16 +2312,17 @@ function FinancialIntegrationTab() {
     async function load() {
       try {
         let text;
+        // Financial config is stored separately in financial_config.json (0640)
+        // to keep API keys away from the world-readable institution.json.
         if (window.cockpit && window.cockpit.file) {
-          text = await window.cockpit.file(`${baseDir}/institution.json`).read();
+          text = await window.cockpit.file(`${baseDir}/financial_config.json`).read();
         } else {
-          const resp = await fetch('institution.json');
+          const resp = await fetch('financial_config.json');
           if (!resp.ok) return;
           text = await resp.text();
         }
         if (cancelled) return;
-        const json = JSON.parse(text);
-        const cfg = json.financialIntegration || {};
+        const cfg = JSON.parse(text);
         setFi({
           enabled: !!cfg.enabled,
           type: cfg.type || 'none',
@@ -2307,14 +2362,6 @@ function FinancialIntegrationTab() {
     try {
       setError(null);
       setStatus(null);
-      let text;
-      if (window.cockpit && window.cockpit.file) {
-        text = await window.cockpit.file(`${baseDir}/institution.json`).read();
-      } else {
-        const resp = await fetch('institution.json');
-        text = await resp.text();
-      }
-      const json = JSON.parse(text);
       const coa = {};
       coaRows.forEach(r => {
         if (r.account) {
@@ -2326,18 +2373,20 @@ function FinancialIntegrationTab() {
           };
         }
       });
-      json.financialIntegration = {
+      // Save to financial_config.json (separate from institution.json so that
+      // API keys and webhook secrets can have restricted permissions: 0640).
+      const cfg = {
         enabled: fi.enabled,
         type: fi.type,
         webhookUrl: fi.webhookUrl,
         apiKey: fi.apiKey,
         chartOfAccounts: coa
       };
-      const out = JSON.stringify(json, null, 2);
+      const out = JSON.stringify(cfg, null, 2);
       if (window.cockpit && window.cockpit.file) {
-        await window.cockpit.file(`${baseDir}/institution.json`).replace(out);
+        await window.cockpit.file(`${baseDir}/financial_config.json`).replace(out);
       } else {
-        await fetch('institution.json', {
+        await fetch('financial_config.json', {
           method: 'PUT',
           headers: { 'Content-Type': 'application/json' },
           body: out
@@ -3399,15 +3448,31 @@ function getInvoiceLedgerPath() {
   return INVOICE_LEDGER_PATH;
 }
 
-async function loadInvoiceLedger() {
+async function loadInvoiceLedger(setError) {
   try {
-    if (window.cockpit && window.cockpit.file) {
-      const text = await window.cockpit.file(getInvoiceLedgerPath()).read();
-      return JSON.parse(text);
+    let content;
+    if (HAS_COCKPIT) {
+      content = await window.cockpit.spawn(
+        ['python3', `${PLUGIN_BASE}/ledger_util.py`, '--action', 'read'],
+        { err: 'message' }
+      );
     } else {
       const resp = await fetch('invoices.json');
       if (!resp.ok) return { invoices: [] };
-      return await resp.json();
+      content = await resp.text();
+    }
+    try {
+      const parsed = JSON.parse(content);
+      if (!parsed.invoices || !Array.isArray(parsed.invoices)) {
+        throw new Error('Invalid ledger format');
+      }
+      return parsed;
+    } catch (e) {
+      console.error('Invoice ledger corrupted:', e);
+      if (setError) {
+        setError('Invoice ledger is corrupted. Check /etc/slurmledger/invoices.json or restore from backup (.bak)');
+      }
+      return { invoices: [], corrupted: true };
     }
   } catch (e) {
     return { invoices: [] };
@@ -3415,14 +3480,70 @@ async function loadInvoiceLedger() {
 }
 
 async function saveInvoiceLedger(ledger) {
-  const text = JSON.stringify(ledger, null, 2);
-  if (window.cockpit && window.cockpit.file) {
-    await window.cockpit.file(getInvoiceLedgerPath()).replace(text);
+  if (HAS_COCKPIT) {
+    const text = JSON.stringify(ledger, null, 2);
+    await window.cockpit.spawn(
+      ['python3', `${PLUGIN_BASE}/ledger_util.py`, '--action', 'add'],
+      { input: text, err: 'message' }
+    );
   } else {
+    const text = JSON.stringify(ledger, null, 2);
     await fetch('invoices.json', {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
       body: text
+    });
+  }
+}
+
+async function updateInvoiceLedger(invoiceId, patch) {
+  if (HAS_COCKPIT) {
+    await window.cockpit.spawn(
+      ['python3', `${PLUGIN_BASE}/ledger_util.py`, '--action', 'update', '--invoice-id', invoiceId],
+      { input: JSON.stringify(patch), err: 'message' }
+    );
+  } else {
+    // Fallback: read-modify-write via fetch
+    const resp = await fetch('invoices.json');
+    if (!resp.ok) throw new Error('Failed to load ledger');
+    const ledger = await resp.json();
+    const updated = {
+      ...ledger,
+      invoices: (ledger.invoices || []).map(inv =>
+        inv.id === invoiceId ? { ...inv, ...patch } : inv
+      )
+    };
+    await fetch('invoices.json', {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(updated, null, 2)
+    });
+  }
+}
+
+async function addRefundToLedger(invoiceId, refund) {
+  if (HAS_COCKPIT) {
+    await window.cockpit.spawn(
+      ['python3', `${PLUGIN_BASE}/ledger_util.py`, '--action', 'add-refund', '--invoice-id', invoiceId],
+      { input: JSON.stringify(refund), err: 'message' }
+    );
+  } else {
+    // Fallback: read-modify-write via fetch
+    const resp = await fetch('invoices.json');
+    if (!resp.ok) throw new Error('Failed to load ledger');
+    const ledger = await resp.json();
+    const updated = {
+      ...ledger,
+      invoices: (ledger.invoices || []).map(inv => {
+        if (inv.id !== invoiceId) return inv;
+        const refunds = [...(inv.refunds || []), refund];
+        return { ...inv, refunds, ...(refund.full ? { status: 'refunded' } : {}) };
+      })
+    };
+    await fetch('invoices.json', {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(updated, null, 2)
     });
   }
 }
@@ -3569,7 +3690,7 @@ function Invoices({ currentUser }) {
 
   useEffect(() => {
     setLoading(true);
-    loadInvoiceLedger()
+    loadInvoiceLedger(setError)
       .then(data => {
         setLedger(data || { invoices: [] });
         setLoading(false);
@@ -3581,15 +3702,14 @@ function Invoices({ currentUser }) {
   }, []);
 
   async function updateInvoice(id, patch) {
-    const updated = {
-      ...ledger,
-      invoices: ledger.invoices.map(inv =>
-        inv.id === id ? { ...inv, ...patch } : inv
-      )
-    };
     try {
-      await saveInvoiceLedger(updated);
-      setLedger(updated);
+      await updateInvoiceLedger(id, patch);
+      setLedger(prev => ({
+        ...prev,
+        invoices: (prev.invoices || []).map(inv =>
+          inv.id === id ? { ...inv, ...patch } : inv
+        )
+      }));
     } catch (e) {
       setError('Failed to save: ' + (e.message || String(e)));
     }
@@ -3671,14 +3791,23 @@ function Invoices({ currentUser }) {
       amount,
       reason,
       date: new Date().toISOString(),
-      issuedBy: currentUser || 'admin'
+      issuedBy: currentUser || 'admin',
+      full: !isPartial
     };
-    const existingRefunds = inv.refunds || [];
-    const newStatus = isPartial ? inv.status : 'refunded';
-    await updateInvoice(inv.id, {
-      status: newStatus,
-      refunds: [...existingRefunds, refund]
-    });
+    try {
+      await addRefundToLedger(inv.id, refund);
+      const newStatus = isPartial ? inv.status : 'refunded';
+      setLedger(prev => ({
+        ...prev,
+        invoices: (prev.invoices || []).map(i => {
+          if (i.id !== inv.id) return i;
+          return { ...i, status: newStatus, refunds: [...(i.refunds || []), refund] };
+        })
+      }));
+    } catch (e) {
+      setError('Failed to issue refund: ' + (e.message || String(e)));
+      return;
+    }
     setRefundTarget(null);
     triggerWebhook('invoice.refunded', inv.id);
     // Generate credit memo PDF
@@ -3929,7 +4058,6 @@ function Invoices({ currentUser }) {
 // ---------------------------------------------------------------------------
 async function saveInvoiceToLedger(invoiceData, amount) {
   try {
-    const ledger = await loadInvoiceLedger();
     const entry = {
       id: invoiceData.invoice_number,
       account: (invoiceData.items || []).length > 0
@@ -3948,8 +4076,16 @@ async function saveInvoiceToLedger(invoiceData, amount) {
       bank_info: invoiceData.bank_info || [],
       refunds: []
     };
-    ledger.invoices = [...(ledger.invoices || []), entry];
-    await saveInvoiceLedger(ledger);
+    if (HAS_COCKPIT) {
+      await window.cockpit.spawn(
+        ['python3', `${PLUGIN_BASE}/ledger_util.py`, '--action', 'add'],
+        { input: JSON.stringify(entry), err: 'message' }
+      );
+    } else {
+      const ledger = await loadInvoiceLedger();
+      ledger.invoices = [...(ledger.invoices || []), entry];
+      await saveInvoiceLedger(ledger);
+    }
   } catch (e) {
     console.warn('Failed to save invoice to ledger:', e);
   }
@@ -4005,7 +4141,8 @@ async function detectUserRole(username, roleConfig) {
 
 function useCurrentUser() {
   const [username, setUsername] = useState('');
-  const [userRole, setUserRole] = useState('admin'); // default admin until resolved
+  const [userRole, setUserRole] = useState('member'); // default member until resolved
+  const [loading, setLoading] = useState(true);
   const [roleConfig, setRoleConfig] = useState({ admins: [], finance: [], pis: [] });
 
   useEffect(() => {
@@ -4038,11 +4175,12 @@ function useCurrentUser() {
 
       const role = await detectUserRole(name, cfg);
       setUserRole(role);
+      setLoading(false);
     }
     resolve();
   }, []);
 
-  return { username, userRole, roleConfig };
+  return { username, userRole, roleConfig, loading };
 }
 
 // Role-gated nav tabs definition
@@ -4405,7 +4543,7 @@ function App() {
   const period = view === 'year' ? yearPeriod : month;
   const { data, error, loading, reload } = useBillingData(period);
   const institutionProfile = useInstitutionProfile();
-  const { username, userRole } = useCurrentUser();
+  const { username, userRole, loading: roleLoading } = useCurrentUser();
   const [invoiceLedger, setInvoiceLedger] = useState({ invoices: [] });
 
   // Load invoice ledger for admin dashboard summary
@@ -4447,6 +4585,16 @@ function App() {
   // Redirect to first available tab if current view is not allowed
   const allowedViews = navTabs.map(t => t.id);
   const activeView = allowedViews.includes(view) ? view : allowedViews[0];
+
+  // Show a loading spinner while role is being resolved to prevent admin UI
+  // from flashing for non-admin users before the role check completes.
+  if (roleLoading) {
+    return React.createElement(
+      'div',
+      { className: 'app', style: { display: 'flex', alignItems: 'center', justifyContent: 'center', minHeight: '200px' } },
+      React.createElement('p', { style: { color: '#6b7280' } }, 'Loading...')
+    );
+  }
 
   return React.createElement(
     'div',
