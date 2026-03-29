@@ -88,6 +88,12 @@ function useBillingData(period) {
         abortRef.current = proc;
         const output = await proc;
         json = JSON.parse(output);
+        // slurmdb.py emits {"error": "<ExcType>", "message": "..."} and exits 1
+        // when an unhandled exception occurs.  Detect that shape here so the
+        // UI surfaces a readable error instead of trying to render bad data.
+        if (json && json.error && json.message && !json.summary) {
+          throw new Error(`${json.error}: ${json.message}`);
+        }
       } else {
         const controller = new AbortController();
         abortRef.current = controller;

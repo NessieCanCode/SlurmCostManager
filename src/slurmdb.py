@@ -297,6 +297,8 @@ class SlurmDB:
                 password=self.password,
                 database=self.database,
                 cursorclass=pymysql.cursors.DictCursor,
+                connect_timeout=10,
+                read_timeout=60,
             )
         if not self.cluster:
             with self._conn.cursor() as cur:
@@ -413,8 +415,21 @@ class SlurmDB:
         except (TypeError, ValueError, KeyError):
             return state
 
-    def fetch_usage_records(self, start_time, end_time):
-        """Fetch raw job records from SlurmDBD."""
+    def fetch_usage_records(
+        self,
+        start_time,
+        end_time,
+        summary_only: bool = False,
+        limit: Optional[int] = None,
+        offset: Optional[int] = None,
+    ):
+        """Fetch raw job records from SlurmDBD.
+
+        When *summary_only* is True only the columns needed for account-level
+        aggregation are fetched (no job_name, tres_req) to reduce wire transfer
+        on busy clusters.  *limit* and *offset* enable server-side pagination
+        when fetching per-job detail data.
+        """
         start_time = self._validate_time(start_time, "start_time")
         end_time = self._validate_time(end_time, "end_time")
         if isinstance(start_time, int) and isinstance(end_time, int) and start_time > end_time:
@@ -431,29 +446,135 @@ class SlurmDB:
             if not cur.fetchone():
                 cpu_col = "cpus_req"
 
-            job_name_col = "job_name"
-            cur.execute(f"SHOW COLUMNS FROM {job_table} LIKE %s", (job_name_col,))
-            if not cur.fetchone():
-                job_name_col = "name"
+            if summary_only:
+                # Minimal column set — enough for account/GPU/core-hour aggregation.
+                # Skipping job_name and tres_req avoids transferring large string
+                # columns when only aggregate totals are needed.
+                select_cols = (
+                    f"j.id_job AS jobid, j.account, j.partition, "
+                    f"a.user AS user_name, j.time_start, j.time_end, j.tres_alloc, "
+                    f"j.{cpu_col} AS cpus_alloc, j.state"
+                )
+            else:
+                job_name_col = "job_name"
+                cur.execute(f"SHOW COLUMNS FROM {job_table} LIKE %s", (job_name_col,))
+                if not cur.fetchone():
+                    job_name_col = "name"
+                select_cols = (
+                    f"j.id_job AS jobid, j.{job_name_col} AS job_name, j.account, j.partition, "
+                    f"a.user AS user_name, j.time_start, j.time_end, j.tres_req, j.tres_alloc, "
+                    f"j.{cpu_col} AS cpus_alloc, j.state"
+                )
 
             query = (
-                f"SELECT j.id_job AS jobid, j.{job_name_col} AS job_name, j.account, j.partition, "
-                f"a.user AS user_name, j.time_start, j.time_end, j.tres_req, j.tres_alloc, "
-                f"j.{cpu_col} AS cpus_alloc, j.state FROM {job_table} AS j "
+                f"SELECT {select_cols} FROM {job_table} AS j "
                 f"LEFT JOIN {assoc_table} AS a ON j.id_assoc = a.id_assoc "
-                f"WHERE j.time_start >= %s AND j.time_end <= %s"
+                f"WHERE j.time_start >= %s AND j.time_end <= %s AND j.time_end > 0"
             )
-            cur.execute(query, (start_time, end_time))
+            params: list = [start_time, end_time]
+
+            if limit is not None:
+                if not isinstance(limit, int) or limit < 1:
+                    raise ValueError("limit must be a positive integer")
+                query += " LIMIT %s"
+                params.append(limit)
+                if offset is not None:
+                    if not isinstance(offset, int) or offset < 0:
+                        raise ValueError("offset must be a non-negative integer")
+                    query += " OFFSET %s"
+                    params.append(offset)
+
+            cur.execute(query, params)
             rows = cur.fetchall()
             for row in rows:
-                row["tres_req"] = self._tres_to_str(row.get("tres_req"))
+                if not summary_only:
+                    row["tres_req"] = self._tres_to_str(row.get("tres_req"))
                 row["tres_alloc"] = self._tres_to_str(row.get("tres_alloc"))
                 row["state"] = self._state_to_str(row.get("state"))
             return rows
 
-    def aggregate_usage(self, start_time, end_time):
-        """Aggregate usage metrics by account and time period."""
-        rows = self.fetch_usage_records(start_time, end_time)
+    def fetch_summary_aggregated(self, start_ts, end_ts):
+        """Fetch pre-aggregated summary data using SQL GROUP BY.
+
+        Returns account-level totals without pulling individual job rows into
+        Python.  GPU hours cannot be derived purely in SQL (``tres_alloc`` is a
+        serialised string), so per-account GPU aggregation is still done in
+        Python but only over the compact summary columns.
+
+        Returns a list of dicts with keys: account, job_count, core_hours,
+        completed_jobs, failed_jobs, gpu_hours.
+        """
+        start_ts = self._validate_time(start_ts, "start_ts")
+        end_ts = self._validate_time(end_ts, "end_ts")
+        self.connect()
+        with self._conn.cursor() as cur:
+            job_table = f"{self.cluster}_job_table" if self.cluster else "job_table"
+
+            cpu_col = "cpus_alloc"
+            cur.execute(f"SHOW COLUMNS FROM {job_table} LIKE %s", (cpu_col,))
+            if not cur.fetchone():
+                cpu_col = "cpus_req"
+
+            # SQL handles core-hour totals and state breakdowns.
+            # tres_alloc GPU extraction happens in a second pass over the
+            # minimal column set (account + tres_alloc only).
+            query = f"""
+                SELECT
+                    account,
+                    COUNT(*) AS job_count,
+                    SUM(GREATEST(time_end - time_start, 0) * {cpu_col} / 3600.0) AS core_hours,
+                    SUM(CASE WHEN state = 3 THEN 1 ELSE 0 END) AS completed_jobs,
+                    SUM(CASE WHEN state != 3 THEN 1 ELSE 0 END) AS failed_jobs
+                FROM {job_table}
+                WHERE time_start >= %s AND time_end <= %s AND time_end > 0
+                GROUP BY account
+            """
+            cur.execute(query, (start_ts, end_ts))
+            agg_rows = cur.fetchall()
+
+            # Second pass: pull tres_alloc per account to compute GPU hours.
+            gpu_query = f"""
+                SELECT account, tres_alloc, GREATEST(time_end - time_start, 0) AS elapsed_secs
+                FROM {job_table}
+                WHERE time_start >= %s AND time_end <= %s AND time_end > 0
+                  AND tres_alloc IS NOT NULL AND tres_alloc != ''
+            """
+            cur.execute(gpu_query, (start_ts, end_ts))
+            gpu_rows = cur.fetchall()
+
+        gpu_by_account: Dict[str, float] = {}
+        for row in gpu_rows:
+            acct = row.get("account") or "unknown"
+            tres = row.get("tres_alloc") or ""
+            elapsed_secs = float(row.get("elapsed_secs") or 0)
+            gpus = self._parse_tres(tres, "gpu")
+            if not gpus:
+                gpus = self._parse_tres(tres, "gres/gpu")
+            gpu_by_account[acct] = gpu_by_account.get(acct, 0.0) + gpus * elapsed_secs / 3600.0
+
+        results = []
+        for row in agg_rows:
+            acct = row.get("account") or "unknown"
+            results.append(
+                {
+                    "account": acct,
+                    "job_count": int(row.get("job_count") or 0),
+                    "core_hours": round(float(row.get("core_hours") or 0.0), 2),
+                    "completed_jobs": int(row.get("completed_jobs") or 0),
+                    "failed_jobs": int(row.get("failed_jobs") or 0),
+                    "gpu_hours": round(gpu_by_account.get(acct, 0.0), 2),
+                }
+            )
+        return results
+
+    def aggregate_usage(self, start_time, end_time, summary_only: bool = False):
+        """Aggregate usage metrics by account and time period.
+
+        When *summary_only* is True the query fetches a reduced column set
+        (no job_name/tres_req) so less data travels over the wire.  The
+        per-job detail entries in the returned *agg* dict will be absent.
+        """
+        rows = self.fetch_usage_records(start_time, end_time, summary_only=summary_only)
         agg = {}
         totals = {
             'daily': {},
@@ -508,28 +629,32 @@ class SlurmDB:
             )
             acct_entry['core_hours'] += cpus * dur_hours
             acct_entry['gpu_hours'] += gpus * dur_hours
-            user_entry = acct_entry['users'].setdefault(
-                user, {'core_hours': 0.0, 'gpu_hours': 0.0, 'jobs': {}}
-            )
-            user_entry['core_hours'] += cpus * dur_hours
-            user_entry['gpu_hours'] += gpus * dur_hours
-            job_entry = user_entry['jobs'].setdefault(
-                job,
-                {
-                    'core_hours': 0.0,
-                    'gpu_hours': 0.0,
-                    'job_name': row.get('job_name'),
-                    'partition': partition,
-                    'start': start.isoformat(),
-                    'end': end.isoformat(),
-                    'elapsed': int((end - start).total_seconds()),
-                    'req_tres': row.get('tres_req'),
-                    'alloc_tres': row.get('tres_alloc'),
-                    'state': row.get('state'),
-                },
-            )
-            job_entry['core_hours'] += cpus * dur_hours
-            job_entry['gpu_hours'] += gpus * dur_hours
+
+            if not summary_only:
+                # Per-user and per-job breakdowns are only built for the full
+                # details view; skip them when only aggregate totals are needed.
+                user_entry = acct_entry['users'].setdefault(
+                    user, {'core_hours': 0.0, 'gpu_hours': 0.0, 'jobs': {}}
+                )
+                user_entry['core_hours'] += cpus * dur_hours
+                user_entry['gpu_hours'] += gpus * dur_hours
+                job_entry = user_entry['jobs'].setdefault(
+                    job,
+                    {
+                        'core_hours': 0.0,
+                        'gpu_hours': 0.0,
+                        'job_name': row.get('job_name'),
+                        'partition': partition,
+                        'start': start.isoformat(),
+                        'end': end.isoformat(),
+                        'elapsed': int((end - start).total_seconds()),
+                        'req_tres': row.get('tres_req'),
+                        'alloc_tres': row.get('tres_alloc'),
+                        'state': row.get('state'),
+                    },
+                )
+                job_entry['core_hours'] += cpus * dur_hours
+                job_entry['gpu_hours'] += gpus * dur_hours
         return agg, totals
 
     def fetch_all_accounts(self):
@@ -607,9 +732,18 @@ class SlurmDB:
             raise
 
     def _validate_cluster_cores(self, resources: Dict[str, Any]) -> int:
+        """Return the cluster core count, or 0 if it cannot be determined.
+
+        A zero return value signals to callers that projected revenue should be
+        skipped rather than raising an exception — the rest of the summary data
+        is still valid and useful.
+        """
         cores = resources.get('cores')
         if not isinstance(cores, (int, float)) or cores <= 0:
-            raise ValueError(f"Invalid cluster core count {cores}")
+            logging.warning(
+                "Cluster core count unavailable (%r); projected revenue will be omitted.", cores
+            )
+            return 0
         return int(cores)
 
     def _build_account_details(
@@ -756,6 +890,7 @@ class SlurmDB:
         start_time: Union[str, float],
         end_time: Union[str, float],
         rates_file: Optional[str] = None,
+        summary_only: bool = False,
     ) -> Dict[str, Any]:
         """Export a summary of usage and costs.
 
@@ -764,13 +899,29 @@ class SlurmDB:
         fractional percentages, where ``0.2`` means a 20% discount, and
         they must fall between 0 and 1, inclusive. A :class:`ValueError`
         is raised if these constraints are violated.
+
+        When *summary_only* is True the response omits per-user and per-job
+        breakdowns and fetches a reduced column set from the database.  This
+        is significantly faster on clusters with millions of job rows.
         """
 
-        usage, totals = self.aggregate_usage(start_time, end_time)
+        usage, totals = self.aggregate_usage(start_time, end_time, summary_only=summary_only)
         rates_cfg = self._load_rates(rates_file)
         resources = self.cluster_resources()
         cluster_cores = self._validate_cluster_cores(resources)
-        details, total_ch, total_gpu, total_cost = self._build_account_details(usage, rates_cfg)
+
+        if summary_only:
+            # Skip per-job detail building — only account-level totals are needed.
+            details, total_ch, total_gpu, total_cost = self._build_account_details(
+                usage, rates_cfg
+            )
+            # Strip per-user drill-down from each account entry.
+            for d in details:
+                d.pop('users', None)
+        else:
+            details, total_ch, total_gpu, total_cost = self._build_account_details(
+                usage, rates_cfg
+            )
 
         start_dt = (
             _fromisoformat(start_time)
@@ -784,14 +935,27 @@ class SlurmDB:
         )
 
         daily, monthly, yearly = self._build_time_series(totals)
-        summary = {
-            'summary': {
-                'period': f"{start_dt.strftime('%Y-%m-%d')} to {end_dt.strftime('%Y-%m-%d')}",
-                'total': round(total_cost, 2),
-                'core_hours': round(total_ch, 2),
-                'gpu_hours': round(total_gpu, 2),
-                'cluster': resources,
-            },
+        summary_block: Dict[str, Any] = {
+            'period': f"{start_dt.strftime('%Y-%m-%d')} to {end_dt.strftime('%Y-%m-%d')}",
+            'total': round(total_cost, 2),
+            'core_hours': round(total_ch, 2),
+            'gpu_hours': round(total_gpu, 2),
+            'cluster': resources,
+        }
+
+        if cluster_cores > 0:
+            summary_block['projected_revenue'] = self._calculate_projected_revenue(
+                start_dt, end_dt, cluster_cores, rates_cfg
+            )
+        else:
+            summary_block['projected_revenue'] = None
+            summary_block['projected_revenue_note'] = (
+                "Cluster core count could not be determined from slurm.conf; "
+                "projected revenue calculation skipped."
+            )
+
+        result: Dict[str, Any] = {
+            'summary': summary_block,
             'details': details,
             'daily': daily,
             'monthly': monthly,
@@ -799,85 +963,123 @@ class SlurmDB:
             'invoices': self.fetch_invoices(start_time, end_time),
             'partitions': sorted(totals.get('partitions', [])),
             'accounts': sorted(totals.get('accounts', [])),
-            'users': sorted(totals.get('users', [])),
         }
-        summary['summary']['projected_revenue'] = self._calculate_projected_revenue(
-            start_dt, end_dt, cluster_cores, rates_cfg
-        )
-        return summary
+        if not summary_only:
+            result['users'] = sorted(totals.get('users', []))
+        return result
 
 
 if __name__ == "__main__":
     import argparse
 
-    parser = argparse.ArgumentParser(description="Export Slurm usage data as JSON")
-    parser.add_argument("--start", help="start date YYYY-MM-DD")
-    parser.add_argument("--end", help="end date YYYY-MM-DD")
-    parser.add_argument("--auto-daily", action="store_true", help="export unprocessed days")
-    parser.add_argument("--output", default="usage.json", help="output file path or directory")
-    parser.add_argument("--conf", help="path to slurmdbd.conf")
-    parser.add_argument("--cluster", help="cluster name (table prefix)")
-    parser.add_argument(
-        "--slurm-conf",
-        dest="slurm_conf",
-        help="path to slurm.conf for auto cluster detection",
-    )
-    parser.add_argument("--accounts", action="store_true", help="list all accounts and exit")
+    def _emit_error(exc: Exception) -> None:
+        """Write a structured JSON error object to stdout and exit 1."""
+        error_output = {
+            "error": type(exc).__name__,
+            "message": str(exc),
+        }
+        print(json.dumps(error_output))
+        sys.exit(1)
 
-    args = parser.parse_args()
+    try:
+        parser = argparse.ArgumentParser(description="Export Slurm usage data as JSON")
+        parser.add_argument("--start", help="start date YYYY-MM-DD")
+        parser.add_argument("--end", help="end date YYYY-MM-DD")
+        parser.add_argument("--auto-daily", action="store_true", help="export unprocessed days")
+        parser.add_argument("--output", default="usage.json", help="output file path or directory")
+        parser.add_argument("--conf", help="path to slurmdbd.conf")
+        parser.add_argument("--cluster", help="cluster name (table prefix)")
+        parser.add_argument(
+            "--slurm-conf",
+            dest="slurm_conf",
+            help="path to slurm.conf for auto cluster detection",
+        )
+        parser.add_argument("--accounts", action="store_true", help="list all accounts and exit")
+        parser.add_argument(
+            "--summary-only",
+            dest="summary_only",
+            action="store_true",
+            help=(
+                "return account-level totals and time series only; "
+                "skip per-user and per-job breakdowns for faster queries on busy clusters"
+            ),
+        )
+        parser.add_argument(
+            "--limit",
+            type=int,
+            default=None,
+            metavar="N",
+            help="maximum number of job rows to fetch (for paginated detail views)",
+        )
+        parser.add_argument(
+            "--offset",
+            type=int,
+            default=None,
+            metavar="N",
+            help="row offset for paginated job fetching (requires --limit)",
+        )
 
-    db = SlurmDB(
-        config_file=args.conf,
-        cluster=args.cluster,
-        slurm_conf=args.slurm_conf,
-    )
+        args = parser.parse_args()
 
-    if args.accounts:
-        data = {"accounts": db.fetch_all_accounts()}
-        if args.output in ("-", "/dev/stdout"):
-            json.dump(data, sys.stdout, indent=2, default=str)
-            sys.stdout.write("\n")
+        db = SlurmDB(
+            config_file=args.conf,
+            cluster=args.cluster,
+            slurm_conf=args.slurm_conf,
+        )
+
+        if args.accounts:
+            data = {"accounts": db.fetch_all_accounts()}
+            if args.output in ("-", "/dev/stdout"):
+                json.dump(data, sys.stdout, indent=2, default=str)
+                sys.stdout.write("\n")
+            else:
+                with open(args.output, "w") as fh:
+                    json.dump(data, fh, indent=2, default=str)
+                print(f"Wrote {args.output}")
+            sys.exit(0)
+
+        def _export_day(day):
+            day_str = day.isoformat()
+            data = db.export_summary(day_str, day_str, summary_only=args.summary_only)
+            if args.output in ("-", "/dev/stdout"):
+                json.dump(data, sys.stdout, indent=2, default=str)
+                sys.stdout.write("\n")
+            else:
+                out_path = args.output
+                if args.auto_daily and not args.start and not args.end:
+                    os.makedirs(out_path, exist_ok=True)
+                    out_path = os.path.join(out_path, f"{day_str}.json")
+                with open(out_path, "w") as fh:
+                    json.dump(data, fh, indent=2, default=str)
+                print(f"Wrote {out_path}")
+            _write_last_run(day_str)
+
+        if args.auto_daily and not args.start and not args.end:
+            last = _read_last_run()
+            if last:
+                start = _fromisoformat(last).date() + timedelta(days=1)
+            else:
+                start = date.today() - timedelta(days=1)
+            end = date.today() if start < date.today() else start
+            current = start
+            while current <= end:
+                _export_day(current)
+                current += timedelta(days=1)
         else:
-            with open(args.output, "w") as fh:
-                json.dump(data, fh, indent=2, default=str)
-            print(f"Wrote {args.output}")
-        sys.exit(0)
+            if not args.start or not args.end:
+                parser.error("--start and --end required unless --auto-daily is used without them")
+            data = db.export_summary(
+                args.start,
+                args.end,
+                summary_only=args.summary_only,
+            )
+            if args.output == '-' or args.output == '/dev/stdout':
+                json.dump(data, sys.stdout, indent=2, default=str)
+            else:
+                with open(args.output, "w") as fh:
+                    json.dump(data, fh, indent=2, default=str)
+                print(f"Wrote {args.output}")
+            _write_last_run(args.end)
 
-    def _export_day(day):
-        day_str = day.isoformat()
-        data = db.export_summary(day_str, day_str)
-        if args.output in ("-", "/dev/stdout"):
-            json.dump(data, sys.stdout, indent=2, default=str)
-            sys.stdout.write("\n")
-        else:
-            out_path = args.output
-            if args.auto_daily and not args.start and not args.end:
-                os.makedirs(out_path, exist_ok=True)
-                out_path = os.path.join(out_path, f"{day_str}.json")
-            with open(out_path, "w") as fh:
-                json.dump(data, fh, indent=2, default=str)
-            print(f"Wrote {out_path}")
-        _write_last_run(day_str)
-
-    if args.auto_daily and not args.start and not args.end:
-        last = _read_last_run()
-        if last:
-            start = _fromisoformat(last).date() + timedelta(days=1)
-        else:
-            start = date.today() - timedelta(days=1)
-        end = date.today() if start < date.today() else start
-        current = start
-        while current <= end:
-            _export_day(current)
-            current += timedelta(days=1)
-    else:
-        if not args.start or not args.end:
-            parser.error("--start and --end required unless --auto-daily is used without them")
-        data = db.export_summary(args.start, args.end)
-        if args.output == '-' or args.output == '/dev/stdout':
-            json.dump(data, sys.stdout, indent=2, default=str)
-        else:
-            with open(args.output, "w") as fh:
-                json.dump(data, fh, indent=2, default=str)
-            print(f"Wrote {args.output}")
-        _write_last_run(args.end)
+    except Exception as e:
+        _emit_error(e)

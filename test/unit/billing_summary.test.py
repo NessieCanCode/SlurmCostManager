@@ -201,21 +201,30 @@ class BillingSummaryTests(unittest.TestCase):
                 db.export_summary('2023-10-01', '2023-10-31')
 
     def test_export_summary_invalid_cluster_cores(self):
+        # When the cluster core count is 0 (e.g. slurm.conf is missing or has
+        # no NodeName lines), export_summary should succeed rather than raising.
+        # projected_revenue is set to None and a human-readable note is added.
         usage = {
             '2023-10': {
-                'acct': {'core_hours': 10.0, 'users': {}}
+                'acct': {'core_hours': 10.0, 'gpu_hours': 0.0, 'users': {}}
             }
+        }
+        totals = {
+            'daily': {}, 'monthly': {}, 'yearly': {},
+            'daily_gpu': {}, 'monthly_gpu': {}, 'yearly_gpu': {},
+            'partitions': set(), 'accounts': {'acct'}, 'users': set(),
         }
         with mock.patch.object(
             SlurmDB,
             'aggregate_usage',
-            return_value=(usage, {'daily': {}, 'monthly': {}, 'yearly': {}}),
+            return_value=(usage, totals),
         ), mock.patch.object(SlurmDB, 'fetch_invoices', return_value=[]), mock.patch.object(
             SlurmDB, 'cluster_resources', return_value={'cores': 0}
         ):
             db = SlurmDB()
-            with self.assertRaises(ValueError):
-                db.export_summary('2023-10-01', '2023-10-31')
+            result = db.export_summary('2023-10-01', '2023-10-31')
+            self.assertIsNone(result['summary']['projected_revenue'])
+            self.assertIn('projected_revenue_note', result['summary'])
 
     def test_export_summary_projected_revenue(self):
         usage = {
