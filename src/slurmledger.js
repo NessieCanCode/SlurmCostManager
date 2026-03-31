@@ -237,18 +237,18 @@ function AccountsChart({ details }) {
           {
             label: 'CPU hrs',
             data: top.map(d => d.core_hours),
-            backgroundColor: '#4e79a7'
+            backgroundColor: CHART_COLORS.cpu
           },
           {
             label: 'GPU hrs',
             data: top.map(d => d.gpu_hours),
-            backgroundColor: '#f28e2b'
+            backgroundColor: CHART_COLORS.gpu
           }
         ]
       },
       options: {
         indexAxis: 'y',
-        responsive: false,
+        responsive: true,
         maintainAspectRatio: false,
         plugins: {
           tooltip: {
@@ -270,7 +270,7 @@ function AccountsChart({ details }) {
   return React.createElement(
     'div',
     { className: 'chart-container' },
-    React.createElement('canvas', { ref: canvasRef, width: 600, height: 300 })
+    React.createElement('canvas', { ref: canvasRef })
   );
 }
 
@@ -454,36 +454,36 @@ function HistoricalUsageChart({ data = [] }) {
           {
             label: 'CPU hrs',
             data: cpuActual,
-            borderColor: '#4e79a7',
+            borderColor: CHART_COLORS.cpu,
             fill: false
           },
           {
             label: 'GPU hrs',
             data: gpuData,
-            borderColor: '#f28e2b',
+            borderColor: CHART_COLORS.gpu,
             fill: false
           },
           {
             label: 'Forecast',
             data: cpuForecast,
-            borderColor: '#4e79a7',
+            borderColor: CHART_COLORS.forecast,
             borderDash: [5, 5],
             fill: false
           }
         ]
       },
-      options: { responsive: false, maintainAspectRatio: false }
+      options: { responsive: true, maintainAspectRatio: false }
     });
     return () => chart.destroy();
   }, [data]);
   return React.createElement(
     'div',
     { className: 'chart-container' },
-    React.createElement('canvas', { ref: canvasRef, width: 600, height: 300 })
+    React.createElement('canvas', { ref: canvasRef })
   );
 }
 
-function PiConsumptionChart({ details, width = 300, height = 300, legend = true }) {
+function PiConsumptionChart({ details, legend = true }) {
   const canvasRef = useRef(null);
   useEffect(() => {
     if (!canvasRef.current) return;
@@ -499,19 +499,6 @@ function PiConsumptionChart({ details, width = 300, height = 300, legend = true 
     entries.sort((a, b) => b.core - a.core);
     const top = entries.slice(0, 10);
 
-    const colors = [
-      '#4e79a7',
-      '#f28e2b',
-      '#e15759',
-      '#76b7b2',
-      '#59a14f',
-      '#edc949',
-      '#af7aa1',
-      '#ff9da7',
-      '#9c755f',
-      '#bab0ac'
-    ];
-
     const chart = new Chart(canvasRef.current.getContext('2d'), {
       type: 'pie',
       data: {
@@ -519,12 +506,12 @@ function PiConsumptionChart({ details, width = 300, height = 300, legend = true 
         datasets: [
           {
             data: top.map(e => e.core),
-            backgroundColor: colors.slice(0, top.length)
+            backgroundColor: CHART_COLORS.pie.slice(0, top.length)
           }
         ]
       },
       options: {
-        responsive: false,
+        responsive: true,
         maintainAspectRatio: false,
         plugins: {
           legend: legend ? { position: 'right' } : { display: false }
@@ -533,12 +520,12 @@ function PiConsumptionChart({ details, width = 300, height = 300, legend = true 
     });
 
     return () => chart.destroy();
-  }, [details, width, height, legend]);
+  }, [details, legend]);
 
   return React.createElement(
     'div',
-    { className: 'chart-container', style: { width: `${width}px`, height: `${height}px` } },
-    React.createElement('canvas', { ref: canvasRef, width, height })
+    { className: 'chart-container' },
+    React.createElement('canvas', { ref: canvasRef })
   );
 }
 
@@ -600,6 +587,20 @@ function fmtPct(v) {
 }
 
 // Large numbers abbreviated — e.g. 1,234,567 → 1.2M; 12,345 → 12.3K
+const CHART_COLORS = {
+  cpu: '#2563eb', gpu: '#f59e0b', fail: '#ef4444', forecast: '#93c5fd',
+  success: '#16a34a',
+  pie: ['#2563eb','#f59e0b','#ef4444','#10b981','#8b5cf6','#f97316','#ec4899','#06b6d4','#84cc16','#a8a29e']
+};
+
+function LoadingSkeleton({ count = 4 }) {
+  return React.createElement('div', { className: 'kpi-grid' },
+    Array.from({ length: count }, (_, i) =>
+      React.createElement('div', { key: i, className: 'sl-skeleton', style: { height: '120px', borderRadius: '8px' } })
+    )
+  );
+}
+
 function fmtAbbrev(v) {
   const n = Number(v);
   if (!Number.isFinite(n)) return '0';
@@ -773,22 +774,22 @@ function SuccessFailChart({ data }) {
           {
             label: 'Completed',
             data: data.map(d => d.completed || 0),
-            backgroundColor: '#59a14f'
+            backgroundColor: CHART_COLORS.success
           },
           {
             label: 'Failed',
             data: data.map(d => d.failed || 0),
-            backgroundColor: '#e15759'
+            backgroundColor: CHART_COLORS.fail
           },
           {
             label: 'Cancelled',
             data: data.map(d => d.cancelled || 0),
-            backgroundColor: '#f28e2b'
+            backgroundColor: CHART_COLORS.gpu
           }
         ]
       },
       options: {
-        responsive: false,
+        responsive: true,
         maintainAspectRatio: false,
         scales: { x: { stacked: true }, y: { stacked: true, beginAtZero: true } },
         plugins: {
@@ -810,7 +811,7 @@ function SuccessFailChart({ data }) {
     });
     return () => chart.destroy();
   }, [data]);
-  return React.createElement('div', { className: 'chart-container' }, React.createElement('canvas', { ref: canvasRef, width: 600, height: 300 }));
+  return React.createElement('div', { className: 'chart-container' }, React.createElement('canvas', { ref: canvasRef }));
 }
 
 function Summary({ summary, details = [], daily = [], monthly = [], yearly = [] }) {
@@ -909,14 +910,16 @@ function Summary({ summary, details = [], daily = [], monthly = [], yearly = [] 
           value: fmtPct(ratio * 100),
           renderChart: () => React.createElement(KpiGauge, { value: ratio })
         }),
+      summary.core_hours > 0 && React.createElement(KpiTile, {
+        label: 'Effective CPU Rate',
+        value: fmtCost(summary.total / summary.core_hours)
+      }),
       React.createElement(KpiTile, {
         label: 'Top 10 Users by CPU-hrs',
         value: null,
         renderChart: () =>
           React.createElement(PiConsumptionChart, {
             details,
-            width: 120,
-            height: 120,
             legend: false
           })
       })
@@ -2337,6 +2340,7 @@ function AllocationModal({ allocation, accountName, onSave, onClose }) {
 // Allocations sub-tab rendered inside Rates
 function AllocationsTab({ allocations, onAllocationsChange, accounts }) {
   const [editTarget, setEditTarget] = useState(null); // { account, alloc } | { account: '', alloc: null }
+  const [confirmRemoveAlloc, setConfirmRemoveAlloc] = useState(null); // accountName | null
 
   function handleSave(accountName, alloc) {
     const updated = { ...allocations, [accountName]: alloc };
@@ -2345,10 +2349,14 @@ function AllocationsTab({ allocations, onAllocationsChange, accounts }) {
   }
 
   function handleRemove(accountName) {
-    if (!window.confirm(`Remove allocation for ${accountName}?`)) return;
+    setConfirmRemoveAlloc(accountName);
+  }
+
+  function confirmRemove() {
     const updated = { ...allocations };
-    delete updated[accountName];
+    delete updated[confirmRemoveAlloc];
     onAllocationsChange(updated);
+    setConfirmRemoveAlloc(null);
   }
 
   const rows = Object.entries(allocations || {});
@@ -2450,7 +2458,28 @@ function AllocationsTab({ allocations, onAllocationsChange, accounts }) {
       accountName: editTarget.account,
       onSave: handleSave,
       onClose: () => setEditTarget(null)
-    })
+    }),
+    confirmRemoveAlloc && React.createElement(
+      ModalPortal,
+      null,
+      React.createElement(
+        'div',
+        { className: 'sl-modal-overlay', onClick: () => setConfirmRemoveAlloc(null) },
+        React.createElement(
+          'div',
+          { className: 'sl-modal', onClick: e => e.stopPropagation(), style: { maxWidth: '400px' } },
+          React.createElement('h3', null, 'Remove Allocation'),
+          React.createElement('p', null, `Remove allocation for ${confirmRemoveAlloc}?`),
+          React.createElement(
+            'div',
+            { style: { display: 'flex', gap: '0.5em', justifyContent: 'flex-end' } },
+            React.createElement('button', { onClick: () => setConfirmRemoveAlloc(null) }, 'No'),
+            React.createElement('button', { onClick: confirmRemove, style: { background: '#dc2626', color: '#fff', border: 'none', borderRadius: '4px', padding: '0.4em 1em', cursor: 'pointer' } }, 'Yes, Remove')
+          )
+        )
+      )
+    ),
+    React.createElement(BalanceCheckerPanel, null)
   );
 }
 
@@ -2990,42 +3019,48 @@ function BillingRuleModal({ rule, onSave, onClose }) {
 
 function BillingRulesTab({ rules, onRulesChange, billingData }) {
   const [editTarget, setEditTarget] = useState(null);
+  const [confirmRemoveRuleIdx, setConfirmRemoveRuleIdx] = useState(null);
 
-  // Count affected jobs in current billing data for a rule
-  function countAffectedJobs(rule) {
-    if (!billingData || !billingData.details) return null;
-    let count = 0;
-    (billingData.details || []).forEach(acct => {
-      (acct.users || []).forEach(u => {
-        (u.jobs || []).forEach(j => {
-          if (!rule.enabled) return;
-          const cond = rule.condition || {};
-          const field = cond.field;
-          const op = cond.operator;
-          let jobVal;
-          if (field === 'elapsed_seconds') jobVal = j.elapsed || 0;
-          else jobVal = j[field] || '';
+  // Count affected jobs per rule, memoized against billingData and rules
+  const affectedJobCounts = useMemo(() => {
+    if (!billingData || !billingData.details) return {};
+    const counts = {};
+    rules.forEach(rule => {
+      if (!rule.id) return;
+      let count = 0;
+      (billingData.details || []).forEach(acct => {
+        (acct.users || []).forEach(u => {
+          (u.jobs || []).forEach(j => {
+            if (!rule.enabled) return;
+            const cond = rule.condition || {};
+            const field = cond.field;
+            const op = cond.operator;
+            let jobVal;
+            if (field === 'elapsed_seconds') jobVal = j.elapsed || 0;
+            else jobVal = j[field] || '';
 
-          let matched = false;
-          try {
-            if (op === 'equals') matched = jobVal === cond.value;
-            else if (op === 'not_equals') matched = jobVal !== cond.value;
-            else if (op === 'in') matched = (cond.values || []).includes(jobVal);
-            else if (op === 'not_in') matched = !(cond.values || []).includes(jobVal);
-            else if (op === 'less_than') matched = Number(jobVal) < Number(cond.value);
-            else if (op === 'greater_than') matched = Number(jobVal) > Number(cond.value);
-            else if (op === 'contains') matched = String(jobVal).includes(String(cond.value));
-          } catch (_) { matched = false; }
+            let matched = false;
+            try {
+              if (op === 'equals') matched = jobVal === cond.value;
+              else if (op === 'not_equals') matched = jobVal !== cond.value;
+              else if (op === 'in') matched = (cond.values || []).includes(jobVal);
+              else if (op === 'not_in') matched = !(cond.values || []).includes(jobVal);
+              else if (op === 'less_than') matched = Number(jobVal) < Number(cond.value);
+              else if (op === 'greater_than') matched = Number(jobVal) > Number(cond.value);
+              else if (op === 'contains') matched = String(jobVal).includes(String(cond.value));
+            } catch (_) { matched = false; }
 
-          if (matched) {
-            const excludes = rule.exclude_states || [];
-            if (!excludes.length || !excludes.includes(j.state)) count++;
-          }
+            if (matched) {
+              const excludes = rule.exclude_states || [];
+              if (!excludes.length || !excludes.includes(j.state)) count++;
+            }
+          });
         });
       });
+      counts[rule.id] = count;
     });
-    return count;
-  }
+    return counts;
+  }, [billingData, rules]);
 
   function handleSave(updatedRule) {
     const idx = rules.findIndex(r => r.id === updatedRule.id);
@@ -3045,9 +3080,12 @@ function BillingRulesTab({ rules, onRulesChange, billingData }) {
   }
 
   function handleRemove(idx) {
-    const rule = rules[idx];
-    if (!window.confirm(`Remove rule "${rule.name}"?`)) return;
-    onRulesChange(rules.filter((_, i) => i !== idx));
+    setConfirmRemoveRuleIdx(idx);
+  }
+
+  function confirmRemoveRule() {
+    onRulesChange(rules.filter((_, i) => i !== confirmRemoveRuleIdx));
+    setConfirmRemoveRuleIdx(null);
   }
 
   function moveRule(idx, direction) {
@@ -3103,7 +3141,7 @@ function BillingRulesTab({ rules, onRulesChange, billingData }) {
                 )
               )
             : rules.map((rule, idx) => {
-                const affected = countAffectedJobs(rule);
+                const affected = billingData ? affectedJobCounts[rule.id] ?? null : null;
                 return React.createElement(
                   'tr',
                   { key: rule.id, style: { opacity: rule.enabled ? 1 : 0.5 } },
@@ -3197,7 +3235,27 @@ function BillingRulesTab({ rules, onRulesChange, billingData }) {
       rule: editTarget,
       onSave: handleSave,
       onClose: () => setEditTarget(null)
-    })
+    }),
+    confirmRemoveRuleIdx !== null && React.createElement(
+      ModalPortal,
+      null,
+      React.createElement(
+        'div',
+        { className: 'sl-modal-overlay', onClick: () => setConfirmRemoveRuleIdx(null) },
+        React.createElement(
+          'div',
+          { className: 'sl-modal', onClick: e => e.stopPropagation(), style: { maxWidth: '400px' } },
+          React.createElement('h3', null, 'Remove Billing Rule'),
+          React.createElement('p', null, `Remove rule "${rules[confirmRemoveRuleIdx] && rules[confirmRemoveRuleIdx].name}"?`),
+          React.createElement(
+            'div',
+            { style: { display: 'flex', gap: '0.5em', justifyContent: 'flex-end' } },
+            React.createElement('button', { onClick: () => setConfirmRemoveRuleIdx(null) }, 'No'),
+            React.createElement('button', { onClick: confirmRemoveRule, style: { background: '#dc2626', color: '#fff', border: 'none', borderRadius: '4px', padding: '0.4em 1em', cursor: 'pointer' } }, 'Yes, Remove')
+          )
+        )
+      )
+    )
   );
 }
 
@@ -3928,8 +3986,7 @@ function Rates({ onRatesUpdated, billingData, username, userRole }) {
   }
 
   if (error) return React.createElement('p', { className: 'error' }, error);
-  if (!config)
-    return React.createElement('p', null, 'Loading rate configuration...');
+  if (!config) return React.createElement('p', null, 'Loading rate configuration...');
 
   const ratesContent = React.createElement(
     'div',
@@ -4564,6 +4621,7 @@ function Invoices({ currentUser, billingData, institutionProfile: instProfile })
   const [exportError, setExportError] = useState(null);
   const [batchProgress, setBatchProgress] = useState(null); // null | { done, total, message }
   const [expandedAudit, setExpandedAudit] = useState(null); // invoice id or null
+  const [confirmCancelInv, setConfirmCancelInv] = useState(null); // invoice | null
 
   useEffect(() => {
     setLoading(true);
@@ -4608,9 +4666,13 @@ function Invoices({ currentUser, billingData, institutionProfile: instProfile })
     triggerWebhook('invoice.paid', inv.id);
   }
 
-  async function handleCancel(inv) {
-    if (!window.confirm(`Cancel invoice ${inv.id}?`)) return;
-    await updateInvoice(inv.id, { status: 'cancelled' });
+  function handleCancel(inv) {
+    setConfirmCancelInv(inv);
+  }
+
+  async function confirmCancelInvoice() {
+    await updateInvoice(confirmCancelInv.id, { status: 'cancelled' });
+    setConfirmCancelInv(null);
   }
 
   async function triggerWebhook(eventType, invoiceId) {
@@ -5212,7 +5274,29 @@ function Invoices({ currentUser, billingData, institutionProfile: instProfile })
       currentUser,
       onClose: () => setRefundTarget(null),
       onIssue: (opts) => handleIssueRefund(refundTarget, opts)
-    })
+    }),
+
+    // Cancel invoice confirm
+    confirmCancelInv && React.createElement(
+      ModalPortal,
+      null,
+      React.createElement(
+        'div',
+        { className: 'sl-modal-overlay', onClick: () => setConfirmCancelInv(null) },
+        React.createElement(
+          'div',
+          { className: 'sl-modal', onClick: e => e.stopPropagation(), style: { maxWidth: '400px' } },
+          React.createElement('h3', null, 'Cancel Invoice'),
+          React.createElement('p', null, `Cancel invoice ${confirmCancelInv.id}?`),
+          React.createElement(
+            'div',
+            { style: { display: 'flex', gap: '0.5em', justifyContent: 'flex-end' } },
+            React.createElement('button', { onClick: () => setConfirmCancelInv(null) }, 'No'),
+            React.createElement('button', { onClick: confirmCancelInvoice, style: { background: '#dc2626', color: '#fff', border: 'none', borderRadius: '4px', padding: '0.4em 1em', cursor: 'pointer' } }, 'Yes, Cancel')
+          )
+        )
+      )
+    )
   );
 }
 
@@ -5929,8 +6013,6 @@ function AdminDashboard({ summary, details, daily, yearly, monthly, invoiceLedge
       )
     ),
 
-    React.createElement(BalanceCheckerPanel, null),
-
     React.createElement(ClusterMetricsPanel, { summary, daily }),
 
     React.createElement(
@@ -6523,14 +6605,14 @@ function App() {
 
     React.createElement(
       'nav',
-      { style: { flexShrink: 0, padding: '0 1em', background: '#fff', borderBottom: '1px solid #f3f4f6' } },
+      { style: { flexShrink: 0 } },
       navTabs.map(tab =>
         React.createElement(
           'button',
           {
             key: tab.id,
             onClick: () => setView(tab.id),
-            style: activeView === tab.id ? { fontWeight: 'bold' } : undefined
+            className: activeView === tab.id ? 'active' : ''
           },
           tab.label
         )
