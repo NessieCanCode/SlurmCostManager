@@ -3046,7 +3046,473 @@ function BillingRulesTab({ rules, onRulesChange, billingData }) {
   );
 }
 
-function Rates({ onRatesUpdated, billingData }) {
+// ---------------------------------------------------------------------------
+// UserRolesTab — role management UI inside the Administration view
+// ---------------------------------------------------------------------------
+
+const ROLE_DESCRIPTIONS = [
+  {
+    role: 'Admin',
+    description: 'Everything: rates, allocations, invoices, billing rules, roles, financial integration'
+  },
+  {
+    role: 'Finance',
+    description: 'View all billing data, mark invoices as paid, export reports (no editing rates/rules)'
+  },
+  {
+    role: 'PI',
+    description: "View their accounts' billing, see user breakdown, view their invoices"
+  },
+  {
+    role: 'Member',
+    description: 'View personal job history and cost summary only'
+  }
+];
+
+function RoleChipList({ label, users, onRemove, onAdd, hint }) {
+  const [adding, setAdding] = useState(false);
+  const [inputValue, setInputValue] = useState('');
+  const inputRef = useRef(null);
+
+  function commitAdd() {
+    const v = inputValue.trim();
+    if (v) onAdd(v);
+    setInputValue('');
+    setAdding(false);
+  }
+
+  function handleKeyDown(e) {
+    if (e.key === 'Enter') { e.preventDefault(); commitAdd(); }
+    if (e.key === 'Escape') { setInputValue(''); setAdding(false); }
+  }
+
+  useEffect(() => {
+    if (adding && inputRef.current) inputRef.current.focus();
+  }, [adding]);
+
+  return React.createElement(
+    'div',
+    { style: { marginBottom: '1.5em' } },
+    React.createElement('div', { style: { fontWeight: '600', marginBottom: '0.35em', fontSize: '0.95em' } }, label),
+    React.createElement(
+      'div',
+      { style: { display: 'flex', flexWrap: 'wrap', gap: '0.4em', alignItems: 'center' } },
+      users.map(u =>
+        React.createElement(
+          'span',
+          {
+            key: u,
+            style: {
+              display: 'inline-flex',
+              alignItems: 'center',
+              background: '#eff6ff',
+              border: '1px solid #bfdbfe',
+              borderRadius: '4px',
+              padding: '0.2em 0.5em',
+              fontSize: '0.88em',
+              fontFamily: 'monospace'
+            }
+          },
+          u,
+          React.createElement(
+            'button',
+            {
+              onClick: () => onRemove(u),
+              title: `Remove ${u}`,
+              style: {
+                marginLeft: '0.4em',
+                background: 'none',
+                border: 'none',
+                cursor: 'pointer',
+                color: '#6b7280',
+                fontSize: '0.9em',
+                lineHeight: 1,
+                padding: '0 2px'
+              }
+            },
+            '\u00d7'
+          )
+        )
+      ),
+      adding
+        ? React.createElement(
+            'span',
+            { style: { display: 'inline-flex', alignItems: 'center', gap: '0.25em' } },
+            React.createElement('input', {
+              ref: inputRef,
+              value: inputValue,
+              onChange: e => setInputValue(e.target.value),
+              onKeyDown: handleKeyDown,
+              placeholder: 'username',
+              style: {
+                border: '1px solid #93c5fd',
+                borderRadius: '4px',
+                padding: '0.2em 0.4em',
+                fontSize: '0.88em',
+                fontFamily: 'monospace',
+                width: '10em'
+              }
+            }),
+            React.createElement(
+              'button',
+              {
+                onClick: commitAdd,
+                style: {
+                  background: '#3b82f6',
+                  color: '#fff',
+                  border: 'none',
+                  borderRadius: '4px',
+                  padding: '0.2em 0.6em',
+                  cursor: 'pointer',
+                  fontSize: '0.85em'
+                }
+              },
+              'Add'
+            ),
+            React.createElement(
+              'button',
+              {
+                onClick: () => { setInputValue(''); setAdding(false); },
+                style: {
+                  background: 'none',
+                  border: '1px solid #d1d5db',
+                  borderRadius: '4px',
+                  padding: '0.2em 0.5em',
+                  cursor: 'pointer',
+                  fontSize: '0.85em'
+                }
+              },
+              'Cancel'
+            )
+          )
+        : React.createElement(
+            'button',
+            {
+              onClick: () => setAdding(true),
+              title: 'Add user',
+              style: {
+                background: '#f3f4f6',
+                border: '1px solid #d1d5db',
+                borderRadius: '4px',
+                padding: '0.2em 0.55em',
+                cursor: 'pointer',
+                fontSize: '0.9em',
+                lineHeight: 1,
+                color: '#374151'
+              }
+            },
+            '+'
+          )
+    ),
+    hint && React.createElement(
+      'div',
+      { style: { fontSize: '0.8em', color: '#6b7280', marginTop: '0.35em' } },
+      hint
+    )
+  );
+}
+
+function UserRolesTab({ username, userRole }) {
+  const baseDir = PLUGIN_BASE;
+
+  const [admins, setAdmins] = useState([]);
+  const [finance, setFinance] = useState([]);
+  const [pis, setPis] = useState([]);
+  const [accountPrefix, setAccountPrefix] = useState('');
+  const [groupPrefix, setGroupPrefix] = useState('');
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
+  const [status, setStatus] = useState(null);
+  const [loadError, setLoadError] = useState(null);
+
+  // Load current roles from institution.json
+  useEffect(() => {
+    async function load() {
+      try {
+        let text;
+        if (window.cockpit && window.cockpit.file) {
+          text = await window.cockpit.file(`${baseDir}/institution.json`).read();
+        } else {
+          const resp = await fetch('institution.json');
+          if (!resp.ok) throw new Error('Failed to load institution.json');
+          text = await resp.text();
+        }
+        const json = JSON.parse(text);
+        const roles = json.roles || {};
+        setAdmins(Array.isArray(roles.admins) ? roles.admins : []);
+        setFinance(Array.isArray(roles.finance) ? roles.finance : []);
+        setPis(Array.isArray(roles.pis) ? roles.pis : []);
+        setAccountPrefix(roles.accountPrefix || '');
+        setGroupPrefix(roles.groupPrefix || '');
+      } catch (e) {
+        setLoadError(e.message || String(e));
+      } finally {
+        setLoading(false);
+      }
+    }
+    load();
+  }, [baseDir]);
+
+  async function save() {
+    setSaving(true);
+    setStatus(null);
+    try {
+      let text;
+      if (window.cockpit && window.cockpit.file) {
+        text = await window.cockpit.file(`${baseDir}/institution.json`).read();
+      } else {
+        const resp = await fetch('institution.json');
+        if (!resp.ok) throw new Error('Failed to load institution.json');
+        text = await resp.text();
+      }
+      const json = JSON.parse(text);
+      json.roles = { admins, finance, pis, accountPrefix, groupPrefix };
+      const updated = JSON.stringify(json, null, 2);
+      if (window.cockpit && window.cockpit.file) {
+        await window.cockpit.file(`${baseDir}/institution.json`).replace(updated);
+      } else {
+        await fetch('institution.json', {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: updated
+        });
+      }
+      setStatus('Roles saved.');
+    } catch (e) {
+      setStatus(`Error saving: ${e.message || String(e)}`);
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  function makeAdder(setter) {
+    return function(value) {
+      setter(prev => prev.includes(value) ? prev : [...prev, value]);
+      setStatus(null);
+    };
+  }
+
+  function makeRemover(setter) {
+    return function(value) {
+      setter(prev => prev.filter(u => u !== value));
+      setStatus(null);
+    };
+  }
+
+  if (loading) {
+    return React.createElement('div', { style: { padding: '1em', color: '#6b7280' } }, 'Loading roles...');
+  }
+
+  if (loadError) {
+    return React.createElement(
+      'div',
+      { style: { padding: '1em', color: '#dc2626' } },
+      'Failed to load roles: ', loadError
+    );
+  }
+
+  const roleLabelStyle = { display: 'inline-block', padding: '0.1em 0.5em', borderRadius: '4px', fontSize: '0.8em', fontWeight: '600', marginLeft: '0.5em' };
+  const roleBadgeColors = {
+    admin: { background: '#dbeafe', color: '#1d4ed8' },
+    finance: { background: '#dcfce7', color: '#15803d' },
+    pi: { background: '#fef3c7', color: '#92400e' },
+    member: { background: '#f3f4f6', color: '#374151' }
+  };
+  const badgeStyle = roleBadgeColors[userRole] || roleBadgeColors.member;
+
+  return React.createElement(
+    'div',
+    { style: { maxWidth: '720px' } },
+
+    // Current user badge
+    React.createElement(
+      'div',
+      {
+        style: {
+          background: '#f9fafb',
+          border: '1px solid #e5e7eb',
+          borderRadius: '6px',
+          padding: '0.6em 1em',
+          marginBottom: '1.5em',
+          fontSize: '0.9em',
+          display: 'flex',
+          alignItems: 'center',
+          gap: '0.4em'
+        }
+      },
+      'You are logged in as:',
+      React.createElement('strong', { style: { fontFamily: 'monospace' } }, username || '(unknown)'),
+      React.createElement(
+        'span',
+        { style: { ...roleLabelStyle, ...badgeStyle } },
+        userRole.charAt(0).toUpperCase() + userRole.slice(1)
+      )
+    ),
+
+    React.createElement('h3', { style: { marginTop: 0, marginBottom: '1em' } }, 'User Roles'),
+
+    React.createElement(RoleChipList, {
+      label: 'Admins (full access):',
+      users: admins,
+      onAdd: makeAdder(setAdmins),
+      onRemove: makeRemover(setAdmins)
+    }),
+
+    React.createElement(RoleChipList, {
+      label: 'Finance (invoices, read-only billing):',
+      users: finance,
+      onAdd: makeAdder(setFinance),
+      onRemove: makeRemover(setFinance)
+    }),
+
+    React.createElement(RoleChipList, {
+      label: 'PIs (auto-detected from SLURM + manual):',
+      users: pis,
+      onAdd: makeAdder(setPis),
+      onRemove: makeRemover(setPis),
+      hint: 'PIs are also auto-detected from SLURM account coordinators via sacctmgr, and via account/group prefix matching below. Users listed here are always treated as PIs.'
+    }),
+
+    // PI auto-detection prefix config
+    React.createElement('div', {
+      style: { background: '#f0f9ff', border: '1px solid #bae6fd', borderRadius: '6px',
+               padding: '1em', marginBottom: '1.5em' }
+    },
+      React.createElement('strong', { style: { display: 'block', marginBottom: '0.5em' } },
+        'PI Auto-Detection via Account/Group Naming'
+      ),
+      React.createElement('p', { style: { margin: '0 0 0.75em', fontSize: '0.88em', color: '#374151' } },
+        'If your site uses naming conventions like "project_ucm_username" for SLURM accounts or "ucm_username" for Unix groups, configure the prefixes below. Any user whose username matches will be detected as a PI.'
+      ),
+      React.createElement('div', { style: { display: 'flex', gap: '1em', flexWrap: 'wrap' } },
+        React.createElement('label', { style: { flex: '1', minWidth: '200px' } },
+          React.createElement('span', { style: { display: 'block', fontSize: '0.85em', fontWeight: 'bold', marginBottom: '0.25em' } },
+            'SLURM Account Prefix'
+          ),
+          React.createElement('input', {
+            type: 'text',
+            value: accountPrefix,
+            onChange: e => { setAccountPrefix(e.target.value); setStatus(null); },
+            placeholder: 'e.g., project_ucm_',
+            style: { width: '100%', padding: '0.4em' }
+          }),
+          React.createElement('span', { style: { fontSize: '0.8em', color: '#6b7280' } },
+            accountPrefix ? `Matches: ${accountPrefix}{username} → e.g., ${accountPrefix}jsmith` : 'Leave empty to disable'
+          )
+        ),
+        React.createElement('label', { style: { flex: '1', minWidth: '200px' } },
+          React.createElement('span', { style: { display: 'block', fontSize: '0.85em', fontWeight: 'bold', marginBottom: '0.25em' } },
+            'Unix Group Prefix'
+          ),
+          React.createElement('input', {
+            type: 'text',
+            value: groupPrefix,
+            onChange: e => { setGroupPrefix(e.target.value); setStatus(null); },
+            placeholder: 'e.g., ucm_',
+            style: { width: '100%', padding: '0.4em' }
+          }),
+          React.createElement('span', { style: { fontSize: '0.8em', color: '#6b7280' } },
+            groupPrefix ? `Matches: ${groupPrefix}{username} → e.g., ${groupPrefix}jsmith` : 'Leave empty to disable'
+          )
+        )
+      )
+    ),
+
+    React.createElement(
+      'div',
+      {
+        style: {
+          background: '#f9fafb',
+          border: '1px solid #e5e7eb',
+          borderRadius: '6px',
+          padding: '0.75em 1em',
+          marginBottom: '1.5em',
+          fontSize: '0.88em',
+          color: '#374151'
+        }
+      },
+      React.createElement('strong', null, 'Members (everyone else):'),
+      React.createElement(
+        'p',
+        { style: { margin: '0.3em 0 0' } },
+        'All authenticated Cockpit users not listed above are treated as Members with personal usage view only.'
+      )
+    ),
+
+    React.createElement(
+      'div',
+      { style: { marginBottom: '1.5em' } },
+      React.createElement(
+        'button',
+        {
+          onClick: save,
+          disabled: saving,
+          style: {
+            background: '#3b82f6',
+            color: '#fff',
+            border: 'none',
+            borderRadius: '5px',
+            padding: '0.45em 1.1em',
+            cursor: saving ? 'not-allowed' : 'pointer',
+            fontWeight: '600',
+            fontSize: '0.95em'
+          }
+        },
+        saving ? 'Saving...' : 'Save Roles'
+      ),
+      status && React.createElement(
+        'span',
+        {
+          style: {
+            marginLeft: '0.8em',
+            fontSize: '0.9em',
+            color: status.startsWith('Error') ? '#dc2626' : '#15803d'
+          }
+        },
+        status
+      )
+    ),
+
+    // Role descriptions help table
+    React.createElement('h4', { style: { marginTop: '2em', marginBottom: '0.5em', color: '#374151' } }, 'Role Descriptions'),
+    React.createElement(
+      'table',
+      { style: { width: '100%', borderCollapse: 'collapse', fontSize: '0.9em' } },
+      React.createElement(
+        'thead',
+        null,
+        React.createElement(
+          'tr',
+          { style: { background: '#f3f4f6' } },
+          React.createElement('th', { style: { textAlign: 'left', padding: '0.5em 0.75em', border: '1px solid #e5e7eb', width: '15%' } }, 'Role'),
+          React.createElement('th', { style: { textAlign: 'left', padding: '0.5em 0.75em', border: '1px solid #e5e7eb' } }, 'What they can do')
+        )
+      ),
+      React.createElement(
+        'tbody',
+        null,
+        ROLE_DESCRIPTIONS.map(row =>
+          React.createElement(
+            'tr',
+            { key: row.role },
+            React.createElement(
+              'td',
+              { style: { padding: '0.5em 0.75em', border: '1px solid #e5e7eb', fontWeight: '600', whiteSpace: 'nowrap' } },
+              row.role
+            ),
+            React.createElement(
+              'td',
+              { style: { padding: '0.5em 0.75em', border: '1px solid #e5e7eb' } },
+              row.description
+            )
+          )
+        )
+      )
+    )
+  );
+}
+
+function Rates({ onRatesUpdated, billingData, username, userRole }) {
   const [config, setConfig] = useState(null);
   const [originalConfig, setOriginalConfig] = useState(null);
   const [overrides, setOverrides] = useState([]);
@@ -3615,12 +4081,12 @@ function Rates({ onRatesUpdated, billingData }) {
     'div',
     null,
     React.createElement(InstitutionProfile, null),
-    // Tab bar for Rates / Allocations / Billing Rules / Financial Integration
+    // Tab bar for Rates / Allocations / Billing Rules / Financial Integration / User Roles
     React.createElement(
       'div',
       { style: { borderBottom: '2px solid #e5e7eb', marginBottom: '1em', marginTop: '1.5em' } },
-      ['rates', 'allocations', 'billing-rules', 'financial'].map(tab => {
-        const labels = { rates: 'Rate Configuration', allocations: 'Allocations', 'billing-rules': 'Billing Rules', financial: 'Financial Integration' };
+      ['rates', 'allocations', 'billing-rules', 'financial', 'roles'].map(tab => {
+        const labels = { rates: 'Rate Configuration', allocations: 'Allocations', 'billing-rules': 'Billing Rules', financial: 'Financial Integration', roles: 'User Roles' };
         return React.createElement(
           'button',
           {
@@ -3674,7 +4140,8 @@ function Rates({ onRatesUpdated, billingData }) {
       saving && React.createElement('span', null, ' Saving...'),
       status && React.createElement('span', { style: { marginLeft: '0.5em' } }, status)
     ),
-    ratesTab === 'financial' && React.createElement(FinancialIntegrationTab, null)
+    ratesTab === 'financial' && React.createElement(FinancialIntegrationTab, null),
+    ratesTab === 'roles' && React.createElement(UserRolesTab, { username, userRole })
   );
 }
 
@@ -4657,21 +5124,57 @@ function useInstitutionProfile() {
 // ---------------------------------------------------------------------------
 async function detectUserRole(username, roleConfig) {
   if (!username) return 'member';
+
+  // Root is always admin regardless of config
+  if (username === 'root') return 'admin';
+
   const admins = (roleConfig && roleConfig.admins) || [];
   const finance = (roleConfig && roleConfig.finance) || [];
+  const pis = (roleConfig && roleConfig.pis) || [];
+
+  // Explicit role assignments take priority
   if (admins.includes(username)) return 'admin';
   if (finance.includes(username)) return 'finance';
-  // Check if user is a SLURM account coordinator (PI)
+  if (pis.includes(username)) return 'pi';
+
+  // Auto-detect PI from SLURM account naming convention
+  // Many sites use patterns like: project_ucm_{username}, {prefix}_{username}
+  // If a SLURM account exists matching the configured pattern, user is a PI
+  const accountPrefix = (roleConfig && roleConfig.accountPrefix) || '';
+  const groupPrefix = (roleConfig && roleConfig.groupPrefix) || '';
+
   if (HAS_COCKPIT) {
     try {
+      // Method 1: Check sacctmgr coordinator flag
       const out = await window.cockpit.spawn(
         ['sacctmgr', 'show', 'user', username, 'withassoc', '--parsable2', '--noheader'],
         { err: 'ignore' }
       );
-      // If sacctmgr returns rows with coordinator='Yes' they are a PI
       if (out && out.includes('Yes')) return 'pi';
+
+      // Method 2: Check if a SLURM account matching the prefix pattern exists
+      // e.g., accountPrefix = "project_ucm_" → check if "project_ucm_jsmith" exists
+      if (accountPrefix) {
+        const acctName = accountPrefix + username;
+        const acctOut = await window.cockpit.spawn(
+          ['sacctmgr', 'show', 'account', acctName, '--parsable2', '--noheader'],
+          { err: 'ignore' }
+        );
+        if (acctOut && acctOut.trim()) return 'pi';
+      }
+
+      // Method 3: Check if a Unix group matching the prefix pattern exists
+      // e.g., groupPrefix = "ucm_" → check if group "ucm_jsmith" exists
+      if (groupPrefix) {
+        const grpName = groupPrefix + username;
+        const grpOut = await window.cockpit.spawn(
+          ['getent', 'group', grpName],
+          { err: 'ignore' }
+        );
+        if (grpOut && grpOut.trim()) return 'pi';
+      }
     } catch (_) {
-      // sacctmgr not available or user not found — fall through
+      // sacctmgr/getent not available — fall through
     }
   }
   return 'member';
@@ -5534,7 +6037,7 @@ function SetupWizard({ onComplete }) {
     step === 2 && React.createElement(
       'div',
       null,
-      React.createElement(Rates, { onRatesUpdated: () => {} }),
+      React.createElement(Rates, { onRatesUpdated: () => {}, username: '', userRole: 'admin' }),
       React.createElement(
         'div',
         { style: { marginTop: '1.5em', display: 'flex', justifyContent: 'space-between' } },
@@ -5865,7 +6368,7 @@ function App() {
       }),
     activeView === 'invoices' && React.createElement(Invoices, { currentUser: username, billingData: data, institutionProfile }),
     activeView === 'audit' && React.createElement(AuditLogViewer, { invoiceLedger }),
-    activeView === 'settings' && React.createElement(Rates, { onRatesUpdated: reload, billingData: data })
+    activeView === 'settings' && React.createElement(Rates, { onRatesUpdated: reload, billingData: data, username, userRole })
   );
 }
 

@@ -57,16 +57,19 @@ rpm: package
 >rm -rf rpmbuild
 >mkdir -p rpmbuild/BUILD rpmbuild/RPMS rpmbuild/SOURCES rpmbuild/SPECS rpmbuild/SRPMS
 >cp slurmledger-$(VERSION).tar.gz rpmbuild/SOURCES/
->printf 'Summary: SlurmLedger\nName: slurmledger\nVersion: $(VERSION)\nRelease: 1\nLicense: MIT\nSource0: %%{name}-%%{version}.tar.gz\nBuildArch: noarch\nRequires: cockpit\nRequires: python3\nRequires: python3-pymysql\nRequires: python3-reportlab\n%%description\nSlurmLedger Cockpit plugin\n%%prep\n%%setup -q\n%%build\n%%install\nmkdir -p %%{buildroot}/usr/share/cockpit/slurmledger\ncp -a * %%{buildroot}/usr/share/cockpit/slurmledger/\nmkdir -p %%{buildroot}/etc/slurmledger\ncp rates.json %%{buildroot}/etc/slurmledger/rates.json\ncp institution.json %%{buildroot}/etc/slurmledger/institution.json\n%%files\n/usr/share/cockpit/slurmledger\n%%config(noreplace) /etc/slurmledger/rates.json\n%%config(noreplace) /etc/slurmledger/institution.json\n' > rpmbuild/SPECS/slurmledger.spec
+>sed "s/%{version}/$(VERSION)/g" slurmledger.spec > rpmbuild/SPECS/slurmledger.spec
 >$(RPMBUILD) --define "_topdir $(PWD)/rpmbuild" -bb rpmbuild/SPECS/slurmledger.spec
 
 deb: package
 >rm -rf debbuild
 >mkdir -p debbuild/usr/share/cockpit/slurmledger
 >cp -a $(DIST)/* debbuild/usr/share/cockpit/slurmledger/
+>mkdir -p debbuild/etc/slurmledger
+>cp $(DIST)/rates.json debbuild/etc/slurmledger/rates.json
+>cp $(DIST)/institution.json debbuild/etc/slurmledger/institution.json
 >mkdir -p debbuild/DEBIAN
->echo "Package: slurmledger\nVersion: $(VERSION)\nSection: admin\nPriority: optional\nArchitecture: all\nMaintainer: Unknown\nDepends: cockpit\nDescription: SlurmLedger Cockpit plugin" > debbuild/DEBIAN/control
->dpkg-deb --build debbuild slurmledger_$(VERSION)_all.deb
+>printf 'Package: slurmledger\nVersion: %s\nSection: admin\nPriority: optional\nArchitecture: all\nMaintainer: SlurmLedger Contributors\nDepends: cockpit, python3, python3-pymysql, python3-reportlab\nDescription: SlurmLedger Cockpit plugin\n HPC cost management for SLURM clusters.\n' "$(VERSION)" > debbuild/DEBIAN/control
+>fakeroot dpkg-deb --build debbuild slurmledger_$(VERSION)_all.deb
 >rm -rf debbuild
 
 check:

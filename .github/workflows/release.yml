@@ -24,6 +24,10 @@ jobs:
           python-version: '3.x'
       - name: Install deps
         run: pip install pymysql reportlab pytest
+      - name: Install packaging tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y rpm rpmbuild dpkg-dev fakeroot
       - name: Build
         run: make build
       - name: Test
@@ -34,10 +38,10 @@ jobs:
           git config user.email "github-actions@github.com"
           git tag v${{ github.event.inputs.version }} || true
           git push origin v${{ github.event.inputs.version }} || true
-      - name: Package
-        run: |
-          make rpm || true
-          make deb || true
+      - name: Build RPM
+        run: make rpm
+      - name: Build DEB
+        run: make deb
       - name: Publish Release
         uses: softprops/action-gh-release@v2
         with:
@@ -45,6 +49,8 @@ jobs:
           name: SlurmLedger v${{ github.event.inputs.version }}
           generate_release_notes: true
           files: |
+            rpmbuild/RPMS/**/*.rpm
+            slurmledger_*.deb
             dist/**/*
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
