@@ -2,7 +2,6 @@ html, body, #root {
   height: 100%;
   margin: 0;
   padding: 0;
-  overflow: hidden;
 }
 
 body {
@@ -286,19 +285,30 @@ nav button:hover {
 /* Modal overlay for refunds and other dialogs */
 .modal-overlay {
   position: fixed;
-  inset: 0;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  width: 100vw;
+  height: 100vh;
   background: rgba(0, 0, 0, 0.5);
   display: flex;
   align-items: center;
   justify-content: center;
-  z-index: 1000;
+  z-index: 9999;
 }
 
 .modal {
   background: #fff;
-  border-radius: 6px;
-  padding: 1.5em;
-  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.2);
+  border-radius: 8px;
+  padding: 1.5em 2em;
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.3);
+  min-width: 400px;
+  max-width: 600px;
+  max-height: 80vh;
+  overflow-y: auto;
+  z-index: 10000;
+  position: relative;
 }
 
 .modal h3 {

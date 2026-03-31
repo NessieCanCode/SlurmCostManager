@@ -6241,8 +6241,7 @@ function App() {
       style: {
         display: 'flex',
         flexDirection: 'column',
-        height: '100vh',
-        overflow: 'hidden'
+        height: '100vh'
       }
     },
 
