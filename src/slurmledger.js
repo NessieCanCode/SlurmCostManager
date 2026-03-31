@@ -2025,6 +2025,12 @@ function AllocationProgressBar({ percent }) {
   );
 }
 
+// Renders modal content as a direct child of document.body, escaping any
+// overflow/stacking-context created by ancestor scrollable containers.
+function ModalPortal({ children }) {
+  return ReactDOM.createPortal(children, document.body);
+}
+
 // Modal for editing a single allocation entry
 function AllocationModal({ allocation, accountName, onSave, onClose }) {
   const [form, setForm] = useState(allocation ? { ...allocation } : {
@@ -2072,18 +2078,21 @@ function AllocationModal({ allocation, accountName, onSave, onClose }) {
   }
 
   return React.createElement(
-    'div',
-    { className: 'modal-overlay', onClick: onClose, onKeyDown: (e) => { if (e.key === 'Escape') onClose(); } },
+    ModalPortal,
+    null,
     React.createElement(
       'div',
-      {
-        className: 'modal',
-        onClick: e => e.stopPropagation(),
-        style: { maxWidth: '520px', width: '95%' }
-      },
-      React.createElement('h3', null, `${allocation ? 'Edit' : 'Add'} Allocation: ${accountName}`),
-      error && React.createElement('p', { className: 'error' }, error),
+      { className: 'sl-modal-overlay', onClick: onClose, onKeyDown: (e) => { if (e.key === 'Escape') onClose(); } },
       React.createElement(
+        'div',
+        {
+          className: 'sl-modal',
+          onClick: e => e.stopPropagation(),
+          style: { maxWidth: '520px', width: '95%' }
+        },
+        React.createElement('h3', null, `${allocation ? 'Edit' : 'Add'} Allocation: ${accountName}`),
+        error && React.createElement('p', { className: 'error' }, error),
+        React.createElement(
         'div',
         { style: { marginBottom: '0.75em' } },
         React.createElement('label', null, 'Type: '),
@@ -2179,6 +2188,7 @@ function AllocationModal({ allocation, accountName, onSave, onClose }) {
         React.createElement('button', { onClick: onClose }, 'Cancel'),
         React.createElement('button', { onClick: handleSave }, 'Save')
       )
+    )
     )
   );
 }
@@ -2719,14 +2729,17 @@ function BillingRuleModal({ rule, onSave, onClose }) {
     : '';
 
   return React.createElement(
-    'div',
-    { className: 'modal-overlay', onClick: onClose, onKeyDown: (e) => { if (e.key === 'Escape') onClose(); } },
+    ModalPortal,
+    null,
     React.createElement(
       'div',
-      { className: 'modal', onClick: e => e.stopPropagation(), style: { maxWidth: '560px', width: '95%' } },
-      React.createElement('h3', null, isNew ? 'Add Billing Rule' : `Edit Rule: ${rule.name}`),
-      error && React.createElement('p', { className: 'error' }, error),
-      React.createElement('div', { style: { marginBottom: '0.75em' } },
+      { className: 'sl-modal-overlay', onClick: onClose, onKeyDown: (e) => { if (e.key === 'Escape') onClose(); } },
+      React.createElement(
+        'div',
+        { className: 'sl-modal', onClick: e => e.stopPropagation(), style: { maxWidth: '560px', width: '95%' } },
+        React.createElement('h3', null, isNew ? 'Add Billing Rule' : `Edit Rule: ${rule.name}`),
+        error && React.createElement('p', { className: 'error' }, error),
+        React.createElement('div', { style: { marginBottom: '0.75em' } },
         React.createElement('label', null, 'Rule ID: '),
         React.createElement('input', {
           ref: firstInputRef, type: 'text', value: form.id, disabled: !isNew,
@@ -2829,6 +2842,7 @@ function BillingRuleModal({ rule, onSave, onClose }) {
         React.createElement('button', { onClick: onClose }, 'Cancel'),
         React.createElement('button', { onClick: handleSave }, 'Save')
       )
+    )
     )
   );
 }
@@ -4329,16 +4343,19 @@ function RefundModal({ invoice, currentUser, onClose, onIssue }) {
   }
 
   return React.createElement(
-    'div',
-    { className: 'modal-overlay', onClick: onClose, onKeyDown: (e) => { if (e.key === 'Escape') onClose(); } },
+    ModalPortal,
+    null,
     React.createElement(
       'div',
-      {
-        className: 'modal',
-        onClick: e => e.stopPropagation(),
-        style: { maxWidth: '480px', width: '90%' }
-      },
-      React.createElement('h3', null, `Issue Refund — ${invoice.id}`),
+      { className: 'sl-modal-overlay', onClick: onClose, onKeyDown: (e) => { if (e.key === 'Escape') onClose(); } },
+      React.createElement(
+        'div',
+        {
+          className: 'sl-modal',
+          onClick: e => e.stopPropagation(),
+          style: { maxWidth: '480px', width: '90%' }
+        },
+        React.createElement('h3', null, `Issue Refund — ${invoice.id}`),
       React.createElement(
         'div',
         { style: { marginBottom: '0.75em' } },
@@ -4390,6 +4407,7 @@ function RefundModal({ invoice, currentUser, onClose, onIssue }) {
           'Issue Refund'
         )
       )
+    )
     )
   );
 }
@@ -6020,14 +6038,19 @@ function SetupWizard({ onComplete }) {
     ),
     React.createElement('div', { style: { flexShrink: 0 } }, progressBar),
 
-    // Step content — single scrollable container that switches content by step
+    // Step content — keyed wrapper remounts on step change; renderStep returns
+    // a single plain div per step so there is no Fragment ambiguity.
     React.createElement(
       'div',
-      { key: 'step-' + step, style: { overflowY: 'auto', flex: 1, paddingRight: '0.5em' } },
+      { key: step, style: { overflowY: 'auto', flex: 1, paddingRight: '0.5em' } },
+      renderStep()
+    )
+  ); // close SetupWizard outer div
 
-      // Step 1: Institution Profile
-      step === 1 ? React.createElement(
-        React.Fragment,
+  function renderStep() {
+    if (step === 1) {
+      return React.createElement(
+        'div',
         null,
         React.createElement(InstitutionProfile, null),
         React.createElement(
@@ -6039,11 +6062,12 @@ function SetupWizard({ onComplete }) {
             'Next: Set Billing Rates \u2192'
           )
         )
-      ) :
+      );
+    }
 
-      // Step 2: Rate Configuration
-      step === 2 ? React.createElement(
-        React.Fragment,
+    if (step === 2) {
+      return React.createElement(
+        'div',
         null,
         React.createElement(Rates, { onRatesUpdated: () => {}, username: '', userRole: 'admin' }),
         React.createElement(
@@ -6056,12 +6080,13 @@ function SetupWizard({ onComplete }) {
             'Next: Test Connection \u2192'
           )
         )
-      ) :
+      );
+    }
 
-      // Step 3: Database connection test
-      React.createElement(
-        React.Fragment,
-        null,
+    // Step 3: Database connection test
+    return React.createElement(
+      'div',
+      null,
       React.createElement('h3', null, 'Test Database Connection'),
       React.createElement(
         'p',
@@ -6131,9 +6156,8 @@ function SetupWizard({ onComplete }) {
           )
         )
       )
-    ) // close Step 3 Fragment
-    ) // close scrollable wrapper div
-  ); // close SetupWizard outer div
+    );
+  }
 }
 
 function App() {

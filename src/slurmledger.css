@@ -282,23 +282,24 @@ nav button:hover {
   margin-top: 0.2em;
 }
 
-/* Modal overlay for refunds and other dialogs */
-.modal-overlay {
+/* Modal overlay for refunds and other dialogs.
+   Prefixed sl- to avoid collisions with PatternFly's own .modal class.
+   Both elements are portalled to document.body so overflow/stacking-context
+   on ancestor containers cannot clip or hide them. */
+.sl-modal-overlay {
   position: fixed;
   top: 0;
   left: 0;
-  right: 0;
-  bottom: 0;
-  width: 100vw;
-  height: 100vh;
+  width: 100%;
+  height: 100%;
   background: rgba(0, 0, 0, 0.5);
   display: flex;
   align-items: center;
   justify-content: center;
-  z-index: 9999;
+  z-index: 99999;
 }
 
-.modal {
+.sl-modal {
   background: #fff;
   border-radius: 8px;
   padding: 1.5em 2em;
@@ -307,11 +308,11 @@ nav button:hover {
   max-width: 600px;
   max-height: 80vh;
   overflow-y: auto;
-  z-index: 10000;
+  z-index: 100000;
   position: relative;
 }
 
-.modal h3 {
+.sl-modal h3 {
   margin-top: 0;
   margin-bottom: 1em;
 }
