@@ -6231,9 +6231,17 @@ function App() {
 
   return React.createElement(
     'div',
-    { className: 'app' },
+    {
+      className: 'app',
+      style: {
+        display: 'flex',
+        flexDirection: 'column',
+        height: '100vh',
+        overflow: 'hidden'
+      }
+    },
 
-    // Header with role indicator
+    // Header with role indicator (fixed)
     React.createElement(
       'div',
       {
@@ -6241,9 +6249,11 @@ function App() {
           display: 'flex',
           justifyContent: 'space-between',
           alignItems: 'center',
-          padding: '0.5em 0',
-          marginBottom: '0.5em',
-          borderBottom: '1px solid #e5e7eb'
+          padding: '0.5em 1em',
+          borderBottom: '1px solid #e5e7eb',
+          flexShrink: 0,
+          background: '#fff',
+          zIndex: 10
         }
       },
       React.createElement('span', { style: { fontWeight: 'bold', fontSize: '1.1em' } }, 'SlurmLedger'),
@@ -6266,7 +6276,7 @@ function App() {
 
     React.createElement(
       'nav',
-      null,
+      { style: { flexShrink: 0, padding: '0 1em', background: '#fff', borderBottom: '1px solid #f3f4f6' } },
       navTabs.map(tab =>
         React.createElement(
           'button',
@@ -6279,6 +6289,19 @@ function App() {
         )
       )
     ),
+
+    // Scrollable content area
+    React.createElement(
+      'div',
+      {
+        style: {
+          flex: 1,
+          overflowY: 'auto',
+          padding: '1em',
+          background: '#fafafa'
+        }
+      },
+
     activeView === 'summary' &&
       React.createElement(
         'div',
@@ -6373,6 +6396,7 @@ function App() {
     activeView === 'invoices' && React.createElement(Invoices, { currentUser: username, billingData: data, institutionProfile }),
     activeView === 'audit' && React.createElement(AuditLogViewer, { invoiceLedger }),
     activeView === 'settings' && React.createElement(Rates, { onRatesUpdated: reload, billingData: data, username, userRole })
+    ) // close scrollable content div
   );
 }
 

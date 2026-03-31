@@ -1,8 +1,13 @@
+html, body, #root {
+  height: 100%;
+  margin: 0;
+  padding: 0;
+  overflow: hidden;
+}
+
 body {
   /* Use Cockpit/PatternFly's default font so the plugin matches the host UI */
   font-family: var(--pf-global--FontFamily--sans-serif);
-  margin: 0;
-  padding: 0;
 }
 
 nav {
