@@ -15,23 +15,43 @@ const PLUGIN_BASE =
 const HAS_COCKPIT =
   typeof window !== 'undefined' && window.cockpit && window.cockpit.spawn;
 
+// Return today's date as a UTC YYYY-MM-DD string so period boundaries are
+// always evaluated in UTC, avoiding local-timezone skew around midnight.
+function _utcTodayStr() {
+  return new Date().toISOString().slice(0, 10);
+}
+
 function getBillingPeriod(ref = new Date()) {
-  const today = new Date();
+  const todayStr = _utcTodayStr();
   let year, month, end;
   if (typeof ref === 'string') {
     [year, month] = ref.split('-').map(Number);
-    month -= 1;
-    const isCurrent = year === today.getFullYear() && month === today.getMonth();
-    end = isCurrent
-      ? new Date(Date.UTC(today.getFullYear(), today.getMonth(), today.getDate()))
-      : new Date(Date.UTC(year, month + 1, 0));
+    month -= 1; // convert to 0-indexed
+    const refMonthStr = `${year}-${String(month + 1).padStart(2, '0')}`;
+    const isCurrent = todayStr.slice(0, 7) === refMonthStr;
+    // For the current month use today (inclusive); for past months use the
+    // last calendar day of the month. The Python query uses time_end <= end
+    // where end is converted to a start-of-day Unix timestamp, so "today"
+    // as end means jobs finishing today after midnight UTC are captured when
+    // tomorrow's timestamp is used. We therefore advance one day for current
+    // periods so the Python boundary covers all of today.
+    if (isCurrent) {
+      const [ty, tm, td] = todayStr.split('-').map(Number);
+      end = new Date(Date.UTC(ty, tm - 1, td + 1)); // tomorrow = end-of-today inclusive
+    } else {
+      end = new Date(Date.UTC(year, month + 1, 0)); // last day of month
+    }
   } else {
-    year = ref.getFullYear();
-    month = ref.getMonth();
-    const isCurrent = year === today.getFullYear() && month === today.getMonth();
-    end = isCurrent
-      ? new Date(Date.UTC(today.getFullYear(), today.getMonth(), today.getDate()))
-      : new Date(Date.UTC(year, month + 1, 0));
+    year = ref.getUTCFullYear();
+    month = ref.getUTCMonth();
+    const refMonthStr = `${year}-${String(month + 1).padStart(2, '0')}`;
+    const isCurrent = todayStr.slice(0, 7) === refMonthStr;
+    if (isCurrent) {
+      const [ty, tm, td] = todayStr.split('-').map(Number);
+      end = new Date(Date.UTC(ty, tm - 1, td + 1));
+    } else {
+      end = new Date(Date.UTC(year, month + 1, 0));
+    }
   }
   const start = new Date(Date.UTC(year, month, 1));
   return {
@@ -40,12 +60,16 @@ function getBillingPeriod(ref = new Date()) {
   };
 }
 
-function getYearPeriod(year = new Date().getFullYear()) {
-  const today = new Date();
-  const end =
-    year === today.getFullYear()
-      ? new Date(Date.UTC(today.getFullYear(), today.getMonth(), today.getDate()))
-      : new Date(Date.UTC(year, 11, 31));
+function getYearPeriod(year = new Date().getUTCFullYear()) {
+  const todayStr = _utcTodayStr();
+  const isCurrentYear = todayStr.slice(0, 4) === String(year);
+  let end;
+  if (isCurrentYear) {
+    const [ty, tm, td] = todayStr.split('-').map(Number);
+    end = new Date(Date.UTC(ty, tm - 1, td + 1)); // tomorrow = end-of-today inclusive
+  } else {
+    end = new Date(Date.UTC(year, 11, 31));
+  }
   const start = new Date(Date.UTC(year, 0, 1));
   return {
     start: start.toISOString().slice(0, 10),
@@ -57,70 +81,17 @@ function useBillingData(period) {
   const [data, setData] = useState(null);
   const [error, setError] = useState(null);
   const [loading, setLoading] = useState(false);
+  // reloadCount is incremented by reload() to force a re-fetch for the same period.
+  const [reloadCount, setReloadCount] = useState(0);
   const abortRef = useRef(null);
-
-  const load = useCallback(async () => {
-    if (abortRef.current) {
-      if (abortRef.current.abort) abortRef.current.abort();
-      if (abortRef.current.close) abortRef.current.close('cancelled');
-    }
-    setLoading(true);
-    setError(null);
-    try {
-      let json;
-      if (HAS_COCKPIT) {
-        let start, end;
-        if (typeof period === 'string') {
-          ({ start, end } = getBillingPeriod(period));
-        } else if (period && period.start && period.end) {
-          ({ start, end } = period);
-        } else {
-          ({ start, end } = getBillingPeriod());
-        }
-        const args = [
-          'python3',
-          `${PLUGIN_BASE}/slurmdb.py`,
-          '--start',
-          start,
-          '--end',
-          end,
-          '--output',
-          '-',
-        ];
-        const proc = window.cockpit.spawn(args, { err: 'message' });
-        abortRef.current = proc;
-        const output = await proc;
-        json = JSON.parse(output);
-        // slurmdb.py emits {"error": "<ExcType>", "message": "..."} and exits 1
-        // when an unhandled exception occurs.  Detect that shape here so the
-        // UI surfaces a readable error instead of trying to render bad data.
-        if (json && json.error && json.message && !json.summary) {
-          throw new Error(`${json.error}: ${json.message}`);
-        }
-      } else {
-        const controller = new AbortController();
-        abortRef.current = controller;
-        const resp = await fetch('billing.json', { signal: controller.signal });
-        if (!resp.ok) throw new Error('Failed to fetch billing data');
-        json = await resp.json();
-      }
-      setData(json);
-    } catch (e) {
-      if (e.name !== 'AbortError') {
-        console.error(e);
-        setError(e.message || String(e));
-      }
-    } finally {
-      setLoading(false);
-    }
-  }, [period]);
 
   useEffect(() => {
     let currentProc = null;
     const run = async () => {
+      // Cancel any in-flight request before starting a new one.
       if (abortRef.current) {
         if (abortRef.current.abort) abortRef.current.abort();
-        if (abortRef.current.close) abortRef.current.close();
+        if (abortRef.current.close) abortRef.current.close('cancelled');
       }
       setLoading(true);
       setError(null);
@@ -149,6 +120,9 @@ function useBillingData(period) {
           abortRef.current = currentProc;
           const output = await currentProc;
           json = JSON.parse(output);
+          // slurmdb.py emits {"error": "<ExcType>", "message": "..."} and exits 1
+          // when an unhandled exception occurs.  Detect that shape here so the
+          // UI surfaces a readable error instead of trying to render bad data.
           if (json && json.error && json.message && !json.summary) {
             throw new Error(`${json.error}: ${json.message}`);
           }
@@ -177,9 +151,12 @@ function useBillingData(period) {
         if (currentProc.close) currentProc.close('cancelled');
       }
     };
-  }, [period]);
+  // reloadCount triggers a re-fetch without changing the period.
+  }, [period, reloadCount]);
 
-  return { data, error, loading, reload: load };
+  const reload = useCallback(() => setReloadCount(c => c + 1), []);
+
+  return { data, error, loading, reload };
 }
 
 function aggregateAccountDetails(details = []) {
@@ -190,19 +167,31 @@ function aggregateAccountDetails(details = []) {
       core_hours: 0,
       gpu_hours: 0,
       cost: 0,
+      // Preserve allocation from whichever month-slice carries it; later
+      // slices overwrite only if a value is present, so the last non-null
+      // allocation wins (they should all be identical for a given account).
+      allocation: d.allocation || null,
       users: {}
     };
     acct.core_hours += d.core_hours || 0;
     acct.gpu_hours += d.gpu_hours || 0;
     acct.cost += d.cost || 0;
+    if (d.allocation) acct.allocation = d.allocation;
     (d.users || []).forEach(u => {
       const user = acct.users[u.user] || {
         user: u.user,
         core_hours: 0,
-        cost: 0
+        gpu_hours: 0,
+        cost: 0,
+        jobs: []
       };
       user.core_hours += u.core_hours || 0;
+      user.gpu_hours += u.gpu_hours || 0;
       user.cost += u.cost || 0;
+      // Accumulate jobs across months so the year-view job table is complete.
+      if (u.jobs && u.jobs.length) {
+        user.jobs = user.jobs.concat(u.jobs);
+      }
       acct.users[u.user] = user;
     });
     map[d.account] = acct;
@@ -212,10 +201,13 @@ function aggregateAccountDetails(details = []) {
     core_hours: Math.round(a.core_hours * 100) / 100,
     gpu_hours: Math.round(a.gpu_hours * 100) / 100,
     cost: Math.round(a.cost * 100) / 100,
+    allocation: a.allocation || null,
     users: Object.values(a.users).map(u => ({
       user: u.user,
       core_hours: Math.round(u.core_hours * 100) / 100,
-      cost: Math.round(u.cost * 100) / 100
+      gpu_hours: Math.round(u.gpu_hours * 100) / 100,
+      cost: Math.round(u.cost * 100) / 100,
+      jobs: u.jobs || []
     }))
   }));
 }
@@ -226,11 +218,16 @@ function AccountsChart({ details }) {
     if (!canvasRef.current) return;
     const ctx = canvasRef.current.getContext('2d');
     const aggregated = aggregateAccountDetails(details);
+    // Sort by total cost descending (most expensive accounts first) so
+    // admins can immediately see where money is going.  Fall back to
+    // core + gpu hours if cost data is absent.
     const top = aggregated
       .slice()
-      .sort(
-        (a, b) => b.core_hours + b.gpu_hours - (a.core_hours + a.gpu_hours)
-      )
+      .sort((a, b) => {
+        const costDiff = (b.cost || 0) - (a.cost || 0);
+        if (costDiff !== 0) return costDiff;
+        return (b.core_hours + b.gpu_hours) - (a.core_hours + a.gpu_hours);
+      })
       .slice(0, 10);
     const chart = new Chart(ctx, {
       type: 'bar',
@@ -252,7 +249,20 @@ function AccountsChart({ details }) {
       options: {
         indexAxis: 'y',
         responsive: false,
-        maintainAspectRatio: false
+        maintainAspectRatio: false,
+        plugins: {
+          tooltip: {
+            callbacks: {
+              // Show cost alongside hours in the tooltip.
+              afterBody(items) {
+                const idx = items[0] && items[0].dataIndex;
+                if (idx == null) return [];
+                const acct = top[idx];
+                return acct ? [`Cost: ${fmtCost(acct.cost)}`] : [];
+              }
+            }
+          }
+        }
       }
     });
     return () => chart.destroy();
@@ -301,13 +311,18 @@ function KpiGauge({ value }) {
   useEffect(() => {
     if (!canvasRef.current) return;
     const ctx = canvasRef.current.getContext('2d');
+    // Clamp filled portion to [0, 1] so doughnut slices are never negative.
+    // Values > 1 (over 100% utilisation) are shown as fully filled in red.
+    const clamped = Math.min(Math.max(value || 0, 0), 1);
+    const isOverrun = (value || 0) > 1;
+    const fillColor = isOverrun ? '#dc2626' : clamped >= 0.9 ? '#d97706' : '#4e79a7';
     const chart = new Chart(ctx, {
       type: 'doughnut',
       data: {
         datasets: [
           {
-            data: [value, 1 - value],
-            backgroundColor: ['#4e79a7', '#e0e0e0'],
+            data: [clamped, 1 - clamped],
+            backgroundColor: [fillColor, '#e0e0e0'],
             borderWidth: 0
           }
         ]
@@ -414,9 +429,18 @@ function HistoricalUsageChart({ data = [] }) {
         forecastLabels.push(String(year));
       }
     }
-    const avg =
-      cpu.slice(-3).reduce((a, b) => a + b, 0) /
-      Math.min(3, cpu.length);
+    // Exclude the last data point when computing the forecast average if it
+    // is the current (partial) month — a partially-elapsed month will have
+    // far fewer hours than a complete month and would skew the projection
+    // down significantly.  We detect a partial month by checking whether
+    // the last label matches the current UTC month.
+    const todayMonthStr = _utcTodayStr().slice(0, 7); // 'YYYY-MM'
+    const lastIsPartial = isMonthly && lastLabel === todayMonthStr;
+    const completeCpu = lastIsPartial ? cpu.slice(0, -1) : cpu;
+    const avgWindow = completeCpu.slice(-3);
+    const avg = avgWindow.length
+      ? avgWindow.reduce((a, b) => a + b, 0) / avgWindow.length
+      : 0;
     const forecastCpu = forecastLabels.map(() => avg);
     const fullLabels = labels.concat(forecastLabels);
     const cpuActual = cpu.concat(Array(forecastLabels.length).fill(null));
@@ -550,6 +574,41 @@ function formatAllocTres(tres) {
   return `cpu=${t.cpu} mem=${t.mem} node=${t.node} ${gpu}`.trim();
 }
 
+// ---------------------------------------------------------------------------
+// Number formatting utilities
+// ---------------------------------------------------------------------------
+
+// Currency: always $X.XX — e.g. $1,234.56
+function fmtCost(v) {
+  const n = Number(v);
+  if (!Number.isFinite(n)) return '$0.00';
+  return '$' + n.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+}
+
+// Core/GPU hours: comma-separated thousands, 1 decimal — e.g. 1,234.5
+function fmtHours(v) {
+  const n = Number(v);
+  if (!Number.isFinite(n)) return '0.0';
+  return n.toLocaleString('en-US', { minimumFractionDigits: 1, maximumFractionDigits: 1 });
+}
+
+// Percentage: 1 decimal — e.g. 87.3%
+function fmtPct(v) {
+  const n = Number(v);
+  if (!Number.isFinite(n)) return '—';
+  return n.toFixed(1) + '%';
+}
+
+// Large numbers abbreviated — e.g. 1,234,567 → 1.2M; 12,345 → 12.3K
+function fmtAbbrev(v) {
+  const n = Number(v);
+  if (!Number.isFinite(n)) return '0';
+  if (Math.abs(n) >= 1e9) return (n / 1e9).toFixed(1) + 'B';
+  if (Math.abs(n) >= 1e6) return (n / 1e6).toFixed(1) + 'M';
+  if (Math.abs(n) >= 1e3) return (n / 1e3).toFixed(1) + 'K';
+  return String(Math.round(n));
+}
+
 function formatElapsed(sec) {
   if (typeof sec !== 'number') return '';
   const h = Math.floor(sec / 3600)
@@ -659,8 +718,8 @@ function PaginatedJobTable({ jobs }) {
             React.createElement('td', null, formatReqTres(j.req_tres)),
             React.createElement('td', null, formatAllocTres(j.alloc_tres)),
             React.createElement('td', null, j.state || ''),
-            React.createElement('td', null, j.core_hours),
-            React.createElement('td', null, j.cost),
+            React.createElement('td', null, fmtHours(j.core_hours)),
+            React.createElement('td', null, fmtCost(j.cost)),
             React.createElement(
               'td',
               {
@@ -698,10 +757,13 @@ function PaginatedJobTable({ jobs }) {
   );
 }
 
+// SuccessFailChart — stacked bar of completed / failed / cancelled jobs per day.
+// Data items must have: { date, completed, failed, cancelled }
+// These fields are emitted by slurmdb.py's build_time_series().
 function SuccessFailChart({ data }) {
   const canvasRef = useRef(null);
   useEffect(() => {
-    if (!canvasRef.current) return;
+    if (!canvasRef.current || !data || data.length === 0) return;
     const ctx = canvasRef.current.getContext('2d');
     const chart = new Chart(ctx, {
       type: 'bar',
@@ -709,21 +771,41 @@ function SuccessFailChart({ data }) {
         labels: data.map(d => d.date),
         datasets: [
           {
-            label: 'Success',
-            data: data.map(d => d.success),
-            backgroundColor: '#4e79a7'
+            label: 'Completed',
+            data: data.map(d => d.completed || 0),
+            backgroundColor: '#59a14f'
           },
           {
-            label: 'Fail',
-            data: data.map(d => d.fail),
+            label: 'Failed',
+            data: data.map(d => d.failed || 0),
             backgroundColor: '#e15759'
+          },
+          {
+            label: 'Cancelled',
+            data: data.map(d => d.cancelled || 0),
+            backgroundColor: '#f28e2b'
           }
         ]
       },
       options: {
         responsive: false,
         maintainAspectRatio: false,
-        scales: { x: { stacked: true }, y: { stacked: true } }
+        scales: { x: { stacked: true }, y: { stacked: true, beginAtZero: true } },
+        plugins: {
+          tooltip: {
+            callbacks: {
+              footer(items) {
+                const idx = items[0] && items[0].dataIndex;
+                if (idx == null) return [];
+                const d = data[idx];
+                const total = (d.completed || 0) + (d.failed || 0) + (d.cancelled || 0);
+                if (!total) return [];
+                const pct = ((d.completed || 0) / total * 100).toFixed(1);
+                return [`Total: ${total}  |  Success rate: ${pct}%`];
+              }
+            }
+          }
+        }
       }
     });
     return () => chart.destroy();
@@ -774,19 +856,19 @@ function Summary({ summary, details = [], daily = [], monthly = [], yearly = [] 
             'tr',
             null,
             React.createElement('th', null, 'Total Cost'),
-            React.createElement('td', null, `$${summary.total}`)
+            React.createElement('td', null, fmtCost(summary.total))
           ),
           React.createElement(
             'tr',
             null,
             React.createElement('th', null, 'Total Core Hours'),
-            React.createElement('td', null, summary.core_hours)
+            React.createElement('td', null, fmtHours(summary.core_hours))
           ),
           React.createElement(
             'tr',
             null,
             React.createElement('th', null, 'Total GPU Hours'),
-            React.createElement('td', null, summary.gpu_hours || 0)
+            React.createElement('td', null, fmtHours(summary.gpu_hours || 0))
           )
         )
       )
@@ -796,31 +878,39 @@ function Summary({ summary, details = [], daily = [], monthly = [], yearly = [] 
       { className: 'kpi-grid' },
       React.createElement(KpiTile, {
         label: 'Total CPU-hours',
-        value: summary.core_hours,
+        value: fmtHours(summary.core_hours),
         renderChart: () => React.createElement(KpiSparkline, { data: sparklineData })
       }),
-      React.createElement(KpiTile, {
+      summary.gpu_hours > 0 && React.createElement(KpiTile, {
         label: 'Total GPU-hours',
-        value: summary.gpu_hours,
+        value: fmtHours(summary.gpu_hours),
         renderChart: () =>
           React.createElement(KpiSparkline, { data: gpuSparklineData })
       }),
       React.createElement(KpiTile, {
         label: 'Cost recovery ratio',
         value: `${(ratio * 100).toFixed(1)}%`,
-        renderChart: () => React.createElement(KpiGauge, { value: Math.min(Math.max(ratio, 0), 1) })
+        // Pass raw ratio (may be > 1); KpiGauge now handles clamping and colours.
+        renderChart: () => React.createElement(KpiGauge, { value: ratio })
       }),
       React.createElement(KpiTile, {
         label: 'Projected vs Actual Revenue',
-        value: `$${summary.total}`,
+        value: fmtCost(summary.total),
         renderChart: () =>
           React.createElement(BulletChart, {
             actual: summary.total,
             target: targetRevenue
           })
       }),
+      // Cluster utilisation % — only shown when cluster core count is available.
+      summary.cluster && summary.cluster.cores > 0 && summary.projected_revenue > 0 &&
+        React.createElement(KpiTile, {
+          label: 'Cluster utilisation %',
+          value: fmtPct(ratio * 100),
+          renderChart: () => React.createElement(KpiGauge, { value: ratio })
+        }),
       React.createElement(KpiTile, {
-        label: 'Top 10 Users',
+        label: 'Top 10 Users by CPU-hrs',
         value: null,
         renderChart: () =>
           React.createElement(PiConsumptionChart, {
@@ -837,7 +927,7 @@ function Summary({ summary, details = [], daily = [], monthly = [], yearly = [] 
       React.createElement(
         'div',
         { className: 'summary-chart' },
-        React.createElement('h3', null, 'CPU/GPU-hrs per Slurm account'),
+        React.createElement('h3', null, 'CPU/GPU-hrs per Slurm account (top 10 by cost)'),
         React.createElement(AccountsChart, { details })
       ),
       React.createElement(
@@ -845,6 +935,12 @@ function Summary({ summary, details = [], daily = [], monthly = [], yearly = [] 
         { className: 'summary-chart' },
         React.createElement('h3', null, historicalLabel),
         React.createElement(HistoricalUsageChart, { data: historical })
+      ),
+      daily.length > 0 && React.createElement(
+        'div',
+        { className: 'summary-chart' },
+        React.createElement('h3', null, 'Daily job outcomes (completed / failed / cancelled)'),
+        React.createElement(SuccessFailChart, { data: daily })
       )
     )
   );
@@ -895,8 +991,8 @@ function UserDetails({ users }) {
               onKeyDown: (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); toggle(u.user); } }
             },
             React.createElement('td', null, u.user),
-            React.createElement('td', null, u.core_hours),
-            React.createElement('td', null, u.cost)
+            React.createElement('td', null, fmtHours(u.core_hours)),
+            React.createElement('td', null, fmtCost(u.cost))
           )
         );
         if (expanded === u.user) {
@@ -1058,7 +1154,9 @@ function Details({
       { core: 0, gpu: 0, cost: 0 }
     );
 
-    // Load rates config to get correct per-resource rates
+    // Load rates config only to display the rate card on the invoice;
+    // the actual charged amounts come from totals.cost (already computed by
+    // the Python backend with all billing rules and discounts applied).
     let ratesConfig = null;
     try {
       let ratesText;
@@ -1073,24 +1171,44 @@ function Details({
       console.warn('Could not load rates config for invoice:', e);
     }
 
-    // Compute separate rates for CPU and GPU
+    // Informational rates shown on the invoice — used for display only, NOT
+    // for recalculating the total.  The total comes from totals.cost which
+    // already reflects account overrides, discounts, and billing rules.
     let cpuRate = ratesConfig && ratesConfig.defaultRate != null ? ratesConfig.defaultRate : 0.01;
     let gpuRate = ratesConfig && ratesConfig.defaultGpuRate != null ? ratesConfig.defaultGpuRate : 0.10;
-
-    // Apply account-specific override if filtering by a single account
     if (ratesConfig && ratesConfig.overrides && filters.account && ratesConfig.overrides[filters.account]) {
       const ovr = ratesConfig.overrides[filters.account];
       if (ovr.rate != null) cpuRate = ovr.rate;
       if (ovr.gpuRate != null) gpuRate = ovr.gpuRate;
     }
 
-    // Build line items with correct rates; omit zero-qty lines
+    // Build line items.  The amounts are apportioned from totals.cost in
+    // proportion to CPU vs GPU cost so the sum always equals the displayed
+    // total — preventing a mismatch when discounts or billing rules apply.
+    const rawCpuCost = totals.core * cpuRate;
+    const rawGpuCost = totals.gpu * gpuRate;
+    const rawTotal = rawCpuCost + rawGpuCost;
+    const actualTotal = Math.round(totals.cost * 100) / 100;
+
     const items = [];
     if (totals.core > 0) {
-      items.push({ description: 'CPU Core-Hours', qty: totals.core, rate: cpuRate, amount: totals.core * cpuRate });
+      // Apportion actual cost by CPU fraction; if no GPU, all cost is CPU.
+      const cpuFraction = rawTotal > 0 ? rawCpuCost / rawTotal : 1;
+      const cpuAmount = rawTotal > 0
+        ? Math.round(actualTotal * cpuFraction * 100) / 100
+        : actualTotal;
+      items.push({ description: 'CPU Core-Hours', qty: Math.round(totals.core * 10) / 10, rate: cpuRate, amount: cpuAmount });
     }
     if (totals.gpu > 0) {
-      items.push({ description: 'GPU Hours', qty: totals.gpu, rate: gpuRate, amount: totals.gpu * gpuRate });
+      const gpuFraction = rawTotal > 0 ? rawGpuCost / rawTotal : 0;
+      const gpuAmount = Math.round(actualTotal * gpuFraction * 100) / 100;
+      items.push({ description: 'GPU Hours', qty: Math.round(totals.gpu * 10) / 10, rate: gpuRate, amount: gpuAmount });
+    }
+    // Ensure line items sum to exactly actualTotal (rounding correction on last item).
+    if (items.length > 0) {
+      const lineSum = items.reduce((s, i) => s + i.amount, 0);
+      const diff = Math.round((actualTotal - lineSum) * 100) / 100;
+      if (diff !== 0) items[items.length - 1].amount = Math.round((items[items.length - 1].amount + diff) * 100) / 100;
     }
 
     // Sequential invoice number derived from ledger
@@ -1107,10 +1225,10 @@ function Details({
       payment_terms: institutionProfile.paymentTerms || `Net ${paymentTermsDays}`,
       period: month || '',
       items,
-      subtotal: items.reduce((s, i) => s + i.amount, 0),
+      subtotal: actualTotal,
       discount: 0,
       tax: 0,
-      total_due: items.reduce((s, i) => s + i.amount, 0),
+      total_due: actualTotal,
       institution: {
         name: institutionProfile.institutionName || '',
         abbreviation: institutionProfile.institutionAbbreviation || '',
@@ -1292,8 +1410,8 @@ function Details({
                   onKeyDown: (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); toggle(d.account); } }
                 },
                 React.createElement('td', null, d.account),
-                React.createElement('td', null, d.core_hours),
-                React.createElement('td', null, d.cost)
+                React.createElement('td', null, fmtHours(d.core_hours)),
+                React.createElement('td', null, fmtCost(d.cost))
               )
             );
             if (expanded === d.account) {
@@ -2033,6 +2151,8 @@ function ModalPortal({ children }) {
 
 // Modal for editing a single allocation entry
 function AllocationModal({ allocation, accountName, onSave, onClose }) {
+  const isNew = !allocation;
+  const [acctName, setAcctName] = useState(accountName || '');
   const [form, setForm] = useState(allocation ? { ...allocation } : {
     type: 'prepaid',
     budget_su: '',
@@ -2074,7 +2194,12 @@ function AllocationModal({ allocation, accountName, onSave, onClose }) {
       out.billing_period = form.billing_period || 'monthly';
       out.budget_su = form.budget_su ? parseInt(form.budget_su, 10) || null : null;
     }
-    onSave(accountName, out);
+    const finalName = acctName.trim();
+    if (!finalName) {
+      setError('Account name is required');
+      return;
+    }
+    onSave(finalName, out);
   }
 
   return React.createElement(
@@ -2090,8 +2215,24 @@ function AllocationModal({ allocation, accountName, onSave, onClose }) {
           onClick: e => e.stopPropagation(),
           style: { maxWidth: '520px', width: '95%' }
         },
-        React.createElement('h3', null, `${allocation ? 'Edit' : 'Add'} Allocation: ${accountName}`),
-        error && React.createElement('p', { className: 'error' }, error),
+        React.createElement('h3', null, isNew ? 'Add Allocation' : `Edit Allocation: ${accountName}`),
+        error && React.createElement('p', { style: { color: '#dc2626', marginBottom: '0.5em' } }, error),
+
+        // Account name input — only for new allocations
+        isNew && React.createElement(
+          'div',
+          { style: { marginBottom: '0.75em' } },
+          React.createElement('label', { style: { display: 'block', fontWeight: 'bold', marginBottom: '0.25em' } }, 'SLURM Account Name'),
+          React.createElement('input', {
+            ref: firstInputRef,
+            type: 'text',
+            value: acctName,
+            onChange: e => setAcctName(e.target.value),
+            placeholder: 'e.g., physics-lab',
+            style: { width: '100%', padding: '0.4em' }
+          })
+        ),
+
         React.createElement(
         'div',
         { style: { marginBottom: '0.75em' } },
@@ -5600,10 +5741,10 @@ function BalanceCheckerPanel() {
               'tr',
               { key: r.account },
               React.createElement('td', null, r.account),
-              React.createElement('td', null, r.budget_su),
-              React.createElement('td', null, r.used_su),
-              React.createElement('td', null, r.remaining_su),
-              React.createElement('td', null, r.percent_used + '%'),
+              React.createElement('td', null, r.budget_su != null ? Number(r.budget_su).toLocaleString() : '\u2014'),
+              React.createElement('td', null, r.used_su != null ? Number(r.used_su).toLocaleString() : '\u2014'),
+              React.createElement('td', null, r.remaining_su != null ? Number(r.remaining_su).toLocaleString() : '\u2014'),
+              React.createElement('td', null, r.percent_used != null ? fmtPct(r.percent_used) : '\u2014'),
               React.createElement(
                 'td',
                 { style: { color: statusColor[r.status] || '#333', fontWeight: 'bold' } },
@@ -5614,6 +5755,76 @@ function BalanceCheckerPanel() {
         )
       )
     )
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Cluster Metrics Panel — HPC-specific KPIs missing from the base Summary view
+// ---------------------------------------------------------------------------
+function ClusterMetricsPanel({ summary, daily }) {
+  if (!summary) return null;
+
+  // Cost recovery %: actual billed / projected full-utilisation revenue.
+  // projected_revenue = defaultRate * cluster_cores * 24 * period_days — computed in Python.
+  let utilizationPct = null;
+  if (summary.projected_revenue > 0) {
+    utilizationPct = Math.min((summary.total / summary.projected_revenue) * 100, 100);
+  }
+
+  // Job outcome totals from daily state-count data
+  const totalCompleted = daily.reduce((s, d) => s + (d.completed || 0), 0);
+  const totalFailed = daily.reduce((s, d) => s + (d.failed || 0), 0);
+  const totalCancelled = daily.reduce((s, d) => s + (d.cancelled || 0), 0);
+  const totalJobs = totalCompleted + totalFailed + totalCancelled;
+  const successRate = totalJobs > 0 ? (totalCompleted / totalJobs * 100) : null;
+
+  // Avg cost per successful job: total billed cost / completed jobs.
+  // This is an approximation — per-job cost requires per-job data.
+  const costPerSuccess = totalCompleted > 0 ? summary.total / totalCompleted : null;
+
+  const tiles = [];
+
+  if (utilizationPct !== null) {
+    tiles.push(React.createElement(KpiTile, {
+      key: 'util',
+      label: 'Cost Recovery / Utilisation',
+      value: fmtPct(utilizationPct),
+      renderChart: () => React.createElement(KpiGauge, { value: utilizationPct / 100 })
+    }));
+  }
+
+  // summary.cluster_cores is populated by Python if cluster node count is available
+  if (summary.cluster_cores > 0) {
+    tiles.push(React.createElement(KpiTile, {
+      key: 'cores',
+      label: 'Cluster Cores',
+      value: Number(summary.cluster_cores).toLocaleString()
+    }));
+  }
+
+  if (successRate !== null) {
+    tiles.push(React.createElement(KpiTile, {
+      key: 'success',
+      label: `Job success rate (${totalJobs.toLocaleString()} jobs)`,
+      value: fmtPct(successRate)
+    }));
+  }
+
+  if (costPerSuccess !== null) {
+    tiles.push(React.createElement(KpiTile, {
+      key: 'cpj',
+      label: 'Avg cost / successful job',
+      value: fmtCost(costPerSuccess)
+    }));
+  }
+
+  if (tiles.length === 0) return null;
+
+  return React.createElement(
+    'div',
+    { style: { marginBottom: '1.5em' } },
+    React.createElement('h3', { style: { marginBottom: '0.5em' } }, 'Cluster Metrics'),
+    React.createElement('div', { className: 'kpi-grid' }, ...tiles)
   );
 }
 
@@ -5653,7 +5864,7 @@ function AdminDashboard({ summary, details, daily, yearly, monthly, invoiceLedge
         value: React.createElement(
           'span',
           null,
-          `$${totalCost}`,
+          fmtCost(totalCost),
           _deltaBadge(totalCost, prevTotalCost, false)
         )
       }),
@@ -5666,7 +5877,7 @@ function AdminDashboard({ summary, details, daily, yearly, monthly, invoiceLedge
         value: React.createElement(
           'span',
           null,
-          totalCoreHours,
+          fmtHours(totalCoreHours),
           _deltaBadge(totalCoreHours, prevCoreHours, true)
         ),
         renderChart: () => React.createElement(KpiSparkline, { data: daily.map(d => d.core_hours) })
@@ -5676,7 +5887,7 @@ function AdminDashboard({ summary, details, daily, yearly, monthly, invoiceLedge
         value: React.createElement(
           'span',
           null,
-          totalGpuHours,
+          fmtHours(totalGpuHours),
           _deltaBadge(totalGpuHours, prevGpuHours, true)
         ),
         renderChart: () => React.createElement(KpiSparkline, { data: daily.map(d => d.gpu_hours || 0) })
@@ -5710,8 +5921,8 @@ function AdminDashboard({ summary, details, daily, yearly, monthly, invoiceLedge
               'tr',
               { key: a.account },
               React.createElement('td', null, a.account),
-              React.createElement('td', null, a.cost),
-              React.createElement('td', null, a.core_hours)
+              React.createElement('td', null, fmtCost(a.cost)),
+              React.createElement('td', null, fmtHours(a.core_hours))
             )
           )
         )
@@ -5719,6 +5930,8 @@ function AdminDashboard({ summary, details, daily, yearly, monthly, invoiceLedge
     ),
 
     React.createElement(BalanceCheckerPanel, null),
+
+    React.createElement(ClusterMetricsPanel, { summary, daily }),
 
     React.createElement(
       'div',
@@ -5734,6 +5947,12 @@ function AdminDashboard({ summary, details, daily, yearly, monthly, invoiceLedge
         { className: 'summary-chart' },
         React.createElement('h3', null, historicalLabel),
         React.createElement(HistoricalUsageChart, { data: historical })
+      ),
+      React.createElement(
+        'div',
+        { className: 'summary-chart' },
+        React.createElement('h3', null, 'Job Outcomes (Daily)'),
+        React.createElement(SuccessFailChart, { daily })
       )
     )
   );

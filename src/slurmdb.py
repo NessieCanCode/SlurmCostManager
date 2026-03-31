@@ -186,13 +186,23 @@ def build_time_series(
     This is a pure function — it does not require a database connection and
     can be unit-tested independently of :class:`SlurmDB`.
     """
+    all_days = sorted(
+        set(totals['daily'])
+        | set(totals.get('daily_gpu', {}))
+        | set(totals.get('daily_completed', {}))
+        | set(totals.get('daily_failed', {}))
+        | set(totals.get('daily_cancelled', {}))
+    )
     daily = [
         {
             'date': d,
             'core_hours': round(totals['daily'].get(d, 0.0), 2),
             'gpu_hours': round(totals.get('daily_gpu', {}).get(d, 0.0), 2),
+            'completed': totals.get('daily_completed', {}).get(d, 0),
+            'failed': totals.get('daily_failed', {}).get(d, 0),
+            'cancelled': totals.get('daily_cancelled', {}).get(d, 0),
         }
-        for d in sorted(set(totals['daily']) | set(totals.get('daily_gpu', {})))
+        for d in all_days
     ]
     monthly = [
         {
@@ -683,13 +693,21 @@ class SlurmDB:
             # SQL handles core-hour totals and state breakdowns.
             # tres_alloc GPU extraction happens in a second pass over the
             # minimal column set (account + tres_alloc only).
+            # State codes: 3=COMPLETED, 4=CANCELLED, 8=PREEMPTED.
+            # True failures are: 5=FAILED, 6=TIMEOUT, 7=NODE_FAIL,
+            # 9=BOOT_FAIL, 10=DEADLINE, 11=OUT_OF_MEMORY.
+            # CANCELLED and PREEMPTED are tracked separately so the UI can
+            # show an accurate breakdown rather than conflating them with
+            # hardware/resource failures.
             query = f"""
                 SELECT
                     account,
                     COUNT(*) AS job_count,
                     SUM(GREATEST(time_end - time_start, 0) * {cpu_col} / 3600.0) AS core_hours,
                     SUM(CASE WHEN state = 3 THEN 1 ELSE 0 END) AS completed_jobs,
-                    SUM(CASE WHEN state != 3 THEN 1 ELSE 0 END) AS failed_jobs
+                    SUM(CASE WHEN state IN (5,6,7,9,10,11) THEN 1 ELSE 0 END) AS failed_jobs,
+                    SUM(CASE WHEN state = 4 THEN 1 ELSE 0 END) AS cancelled_jobs,
+                    SUM(CASE WHEN state = 8 THEN 1 ELSE 0 END) AS preempted_jobs
                 FROM {job_table}
                 WHERE time_start >= %s AND time_end <= %s AND time_end > 0
                 GROUP BY account
@@ -727,6 +745,8 @@ class SlurmDB:
                     "core_hours": round(float(row.get("core_hours") or 0.0), 2),
                     "completed_jobs": int(row.get("completed_jobs") or 0),
                     "failed_jobs": int(row.get("failed_jobs") or 0),
+                    "cancelled_jobs": int(row.get("cancelled_jobs") or 0),
+                    "preempted_jobs": int(row.get("preempted_jobs") or 0),
                     "gpu_hours": round(gpu_by_account.get(acct, 0.0), 2),
                 }
             )
@@ -739,6 +759,9 @@ class SlurmDB:
         (no job_name/tres_req) so less data travels over the wire.  The
         per-job detail entries in the returned *agg* dict will be absent.
         """
+        # True failure states — distinct from cancelled/preempted.
+        _FAIL_STATES = {'FAILED', 'TIMEOUT', 'NODE_FAIL', 'BOOT_FAIL', 'DEADLINE', 'OUT_OF_MEMORY'}
+
         rows = self.fetch_usage_records(start_time, end_time, summary_only=summary_only)
         agg = {}
         totals = {
@@ -748,6 +771,10 @@ class SlurmDB:
             'daily_gpu': {},
             'monthly_gpu': {},
             'yearly_gpu': {},
+            # Per-day job state counts for the SuccessFailChart.
+            'daily_completed': {},
+            'daily_failed': {},
+            'daily_cancelled': {},
             'partitions': set(),
             'accounts': set(),
             'users': set(),
@@ -763,6 +790,7 @@ class SlurmDB:
             user = row.get('user_name') or 'unknown'
             partition = row.get('partition') or 'unknown'
             job = str(row.get('jobid') or 'unknown')
+            state_str = row.get('state') or ''
             cpus = self._parse_tres(row.get('tres_alloc'), 'cpu')
             if not cpus:
                 try:
@@ -779,6 +807,15 @@ class SlurmDB:
             totals['daily_gpu'][day] = totals['daily_gpu'].get(day, 0.0) + gpus * dur_hours
             totals['monthly_gpu'][month] = totals['monthly_gpu'].get(month, 0.0) + gpus * dur_hours
             totals['yearly_gpu'][year] = totals['yearly_gpu'].get(year, 0.0) + gpus * dur_hours
+
+            # Track job state counts by day.
+            if state_str == 'COMPLETED':
+                totals['daily_completed'][day] = totals['daily_completed'].get(day, 0) + 1
+            elif state_str in _FAIL_STATES:
+                totals['daily_failed'][day] = totals['daily_failed'].get(day, 0) + 1
+            elif state_str == 'CANCELLED':
+                totals['daily_cancelled'][day] = totals['daily_cancelled'].get(day, 0) + 1
+
             totals['partitions'].add(partition)
             totals['accounts'].add(account)
             totals['users'].add(user)
