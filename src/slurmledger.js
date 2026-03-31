@@ -6020,44 +6020,48 @@ function SetupWizard({ onComplete }) {
     ),
     React.createElement('div', { style: { flexShrink: 0 } }, progressBar),
 
-    // Step content — scrollable area
-    // Step 1: Institution Profile
-    step === 1 && React.createElement(
+    // Step content — single scrollable container that switches content by step
+    React.createElement(
       'div',
-      { style: { overflowY: 'auto', flex: 1, paddingRight: '0.5em' } },
-      React.createElement(InstitutionProfile, null),
-      React.createElement(
-        'div',
-        { style: { marginTop: '1.5em', display: 'flex', justifyContent: 'flex-end' } },
-        React.createElement(
-          'button',
-          { onClick: () => setStep(2) },
-          'Next: Set Billing Rates \u2192'
-        )
-      )
-    ),
+      { key: 'step-' + step, style: { overflowY: 'auto', flex: 1, paddingRight: '0.5em' } },
 
-    // Step 2: Rate Configuration (embedded Rates tab, rates sub-tab only)
-    step === 2 && React.createElement(
-      'div',
-      { style: { overflowY: 'auto', flex: 1, paddingRight: '0.5em' } },
-      React.createElement(Rates, { onRatesUpdated: () => {}, username: '', userRole: 'admin' }),
-      React.createElement(
-        'div',
-        { style: { marginTop: '1.5em', display: 'flex', justifyContent: 'space-between' } },
-        React.createElement('button', { onClick: () => setStep(1) }, '\u2190 Back'),
+      // Step 1: Institution Profile
+      step === 1 ? React.createElement(
+        React.Fragment,
+        null,
+        React.createElement(InstitutionProfile, null),
         React.createElement(
-          'button',
-          { onClick: () => { setStep(3); testDbConnection(); } },
-          'Next: Test Connection \u2192'
+          'div',
+          { style: { marginTop: '1.5em', display: 'flex', justifyContent: 'flex-end' } },
+          React.createElement(
+            'button',
+            { onClick: () => setStep(2) },
+            'Next: Set Billing Rates \u2192'
+          )
         )
-      )
-    ),
+      ) :
 
-    // Step 3: Database connection test
-    step === 3 && React.createElement(
-      'div',
-      { style: { overflowY: 'auto', flex: 1, paddingRight: '0.5em' } },
+      // Step 2: Rate Configuration
+      step === 2 ? React.createElement(
+        React.Fragment,
+        null,
+        React.createElement(Rates, { onRatesUpdated: () => {}, username: '', userRole: 'admin' }),
+        React.createElement(
+          'div',
+          { style: { marginTop: '1.5em', display: 'flex', justifyContent: 'space-between' } },
+          React.createElement('button', { onClick: () => setStep(1) }, '\u2190 Back'),
+          React.createElement(
+            'button',
+            { onClick: () => { setStep(3); testDbConnection(); } },
+            'Next: Test Connection \u2192'
+          )
+        )
+      ) :
+
+      // Step 3: Database connection test
+      React.createElement(
+        React.Fragment,
+        null,
       React.createElement('h3', null, 'Test Database Connection'),
       React.createElement(
         'p',
@@ -6127,8 +6131,9 @@ function SetupWizard({ onComplete }) {
           )
         )
       )
-    )
-  );
+    ) // close Step 3 Fragment
+    ) // close scrollable wrapper div
+  ); // close SetupWizard outer div
 }
 
 function App() {
