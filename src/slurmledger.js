@@ -5997,30 +5997,34 @@ function SetupWizard({ onComplete }) {
     'div',
     {
       style: {
-        maxWidth: '700px',
-        margin: '2em auto',
-        padding: '2em',
+        maxWidth: '800px',
+        margin: '1em auto',
+        padding: '1.5em',
         border: '1px solid #e5e7eb',
         borderRadius: '8px',
-        background: '#fff'
+        background: '#fff',
+        maxHeight: 'calc(100vh - 80px)',
+        display: 'flex',
+        flexDirection: 'column'
       }
     },
     React.createElement(
       'div',
-      { style: { marginBottom: '1.5em' } },
+      { style: { marginBottom: '1em', flexShrink: 0 } },
       React.createElement('h2', { style: { margin: 0 } }, 'Welcome to SlurmLedger'),
       React.createElement(
         'p',
-        { style: { color: '#6b7280', marginTop: '0.5em' } },
+        { style: { color: '#4b5563', marginTop: '0.25em', fontSize: '0.9em' } },
         'Complete these steps to get started with billing configuration.'
       )
     ),
-    progressBar,
+    React.createElement('div', { style: { flexShrink: 0 } }, progressBar),
 
+    // Step content — scrollable area
     // Step 1: Institution Profile
     step === 1 && React.createElement(
       'div',
-      null,
+      { style: { overflowY: 'auto', flex: 1, paddingRight: '0.5em' } },
       React.createElement(InstitutionProfile, null),
       React.createElement(
         'div',
@@ -6036,7 +6040,7 @@ function SetupWizard({ onComplete }) {
     // Step 2: Rate Configuration (embedded Rates tab, rates sub-tab only)
     step === 2 && React.createElement(
       'div',
-      null,
+      { style: { overflowY: 'auto', flex: 1, paddingRight: '0.5em' } },
       React.createElement(Rates, { onRatesUpdated: () => {}, username: '', userRole: 'admin' }),
       React.createElement(
         'div',
@@ -6053,7 +6057,7 @@ function SetupWizard({ onComplete }) {
     // Step 3: Database connection test
     step === 3 && React.createElement(
       'div',
-      null,
+      { style: { overflowY: 'auto', flex: 1, paddingRight: '0.5em' } },
       React.createElement('h3', null, 'Test Database Connection'),
       React.createElement(
         'p',
