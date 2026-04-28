@@ -28,6 +28,16 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y rpm dpkg-dev fakeroot
+      - name: Verify version consistency
+        run: |
+          MANIFEST_VERSION=$(jq -r .version manifest.json)
+          INPUT_VERSION="${{ github.event.inputs.version }}"
+          if [ "$MANIFEST_VERSION" != "$INPUT_VERSION" ]; then
+            echo "ERROR: version mismatch — manifest.json says '$MANIFEST_VERSION' but release input is '$INPUT_VERSION'"
+            echo "Update manifest.json to match the intended release version before running this workflow."
+            exit 1
+          fi
+          echo "Version check passed: $MANIFEST_VERSION"
       - name: Build
         run: make build
       - name: Test

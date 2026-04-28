@@ -76,13 +76,13 @@ Full-featured HPC billing and allocation management for SLURM clusters. A Cockpi
 
 ### From RPM (RHEL/Rocky/Alma)
 ```bash
-sudo dnf install slurmledger-1.0.0-1.noarch.rpm
+sudo dnf install slurmledger-0.1.0-1.noarch.rpm
 sudo systemctl try-restart cockpit
 ```
 
 ### From DEB (Ubuntu/Debian)
 ```bash
-sudo dpkg -i slurmledger_1.0.0-1_all.deb
+sudo dpkg -i slurmledger_0.1.0-1_all.deb
 sudo apt-get install -f  # install dependencies
 sudo systemctl try-restart cockpit
 ```
@@ -328,6 +328,24 @@ This file is separate from `institution.json` (which holds non-sensitive configu
 | `/etc/slurmledger/invoices.json` | root:cockpit-ws | 0640 | Invoice ledger |
 | `/etc/slurmledger/rates.json` | root | 0644 | Billing rates |
 
+## Versioning
+
+SlurmLedger follows pre-1.0 [Semantic Versioning](https://semver.org/):
+
+- **Minor bumps** (`0.1.0` → `0.2.0`) may include breaking changes. Breaking changes
+  are called out under `### Breaking` in `CHANGELOG.md` and in the release notes.
+- **Patch bumps** (`0.1.0` → `0.1.1`) must be backwards-compatible bug fixes only.
+  No breaking changes, no new config keys required.
+- **Config-format breaks**: when a minor bump changes the format of `/etc/slurmledger/*.json`,
+  a migration script runs automatically in the `%post` section of the RPM and the `postinst`
+  section of the DEB. You should never need to hand-edit JSON to upgrade across a minor version.
+- **No deprecation period required pre-1.0.** Features may be removed without a deprecation
+  cycle before `v1.0.0`. After `v1.0.0`, full semver deprecation discipline applies.
+
+`v1.0.0` is cut when at least one production deployment at a real HPC center has been live
+for 30+ days without site-reported correctness issues in the billing engine. Until then,
+`0.x` versions are honest first-public-release signals, not feature-incomplete indicators.
+
 ## License
 
-LGPL-2.1 — See [LICENSE](LICENSE).
+MIT — See [LICENSE](LICENSE).

@@ -1,5 +1,5 @@
 {
-  "version": "1.0.0",
+  "version": "0.1.0",
   "name": "slurmledger",
   "summary": "Web UI for analyzing and managing Slurm accounting costs",
   "description": "Cockpit plugin that lets HPC admins view consolidated Slurm charges, retrieve invoice PDFs, and drill into cost breakdowns (core-hours, GPU-hours) for historical analysis and auditing.",

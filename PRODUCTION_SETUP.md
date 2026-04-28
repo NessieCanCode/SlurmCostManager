@@ -27,8 +27,8 @@ sudo systemctl enable --now cockpit.socket
 ### From Release Package
 ```bash
 # Download latest release
-curl -LO https://github.com/NessieCanCode/SlurmLedger/releases/latest/download/slurmledger-1.0.0-1.noarch.rpm
-sudo dnf install slurmledger-1.0.0-1.noarch.rpm
+curl -LO https://github.com/NessieCanCode/SlurmLedger/releases/latest/download/slurmledger-0.1.0-1.noarch.rpm
+sudo dnf install slurmledger-0.1.0-1.noarch.rpm
 ```
 
 ### From Source
